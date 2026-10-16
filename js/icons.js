@@ -35,11 +35,11 @@ ${bays}
   router() {
     return `<path d="M2 14V42A40 12 0 0 0 82 42V14Z" fill="#2f6fae" stroke="#1b4975" stroke-width="1.5"/>
 <ellipse cx="42" cy="14" rx="40" ry="12" fill="#5b9bd8" stroke="#1b4975" stroke-width="1.5"/>
-<g fill="#ffffff" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
-<line x1="16" y1="10" x2="32" y2="10"/><path d="M32 6.5l6 3.5-6 3.5z" stroke="none"/>
-<line x1="68" y1="10" x2="52" y2="10"/><path d="M52 6.5l-6 3.5 6 3.5z" stroke="none"/>
-<line x1="36" y1="18" x2="22" y2="18"/><path d="M22 14.5l-6 3.5 6 3.5z" stroke="none"/>
-<line x1="48" y1="18" x2="62" y2="18"/><path d="M62 14.5l6 3.5-6 3.5z" stroke="none"/>
+<g transform="translate(42,14) scale(1,0.3)" fill="#e3ecf7">
+<polygon transform="rotate(45)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
+<polygon transform="rotate(225)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
+<polygon transform="rotate(-45)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
+<polygon transform="rotate(135)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
 </g>`;
   },
 
