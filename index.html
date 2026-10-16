@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NetSim – Netzwerksimulation</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d3557'/%3E%3Cpath d='M16 8v8M8 24v-8h16v8' fill='none' stroke='%2393c5fd' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='7' r='3' fill='%23fff'/%3E%3Ccircle cx='8' cy='25' r='3' fill='%23fff'/%3E%3Ccircle cx='24' cy='25' r='3' fill='%23fff'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/netsim.css">
+<link rel="stylesheet" href="css/netsim.css?v=2">
 </head>
 <body>
 
@@ -59,6 +59,7 @@
       <g id="viewport">
         <g id="layer-links"></g>
         <g id="layer-devices"></g>
+        <g id="layer-notes"></g>
         <g id="layer-overlay"></g>
       </g>
     </svg>
@@ -97,6 +98,7 @@
       <li><b>Switch:</b> VLANs anlegen und den Ports zuordnen (Access) oder Ports als Trunk zwischen Switches betreiben.</li>
       <li><b>Router:</b> 3 Schnittstellen mit IP/Maske, statische Routen z.&nbsp;B. <code>192.168.1.0/24 via 192.168.2.254</code>.</li>
       <li><b>Testen:</b> im Terminal eines PCs/Servers <code>ping 192.168.1.1</code>, <code>tracert 10.0.0.10</code>, <code>ipconfig</code>; in der Router-CLI <code>ping</code>, <code>show ip route</code>, <code>show ip interface brief</code>.</li>
+      <li><b>Text:</b> Werkzeug „Text“ aus der Leiste einfügen; danach Farbe, Schriftgröße und Normal/Fett/Kursiv wählen. Doppelklick auf einen Text öffnet den Editor erneut, Strg+Enter schließt ihn.</li>
       <li><b>Ansicht:</b> leere Fläche ziehen = verschieben, Mausrad = zoomen.</li>
     </ul>
     <h3>Tastenkürzel</h3>
@@ -112,13 +114,14 @@
 
 <input type="file" id="file-input" accept=".netsim,.json,application/json" hidden>
 
-<script src="js/util.js"></script>
-<script src="js/model.js"></script>
-<script src="js/icons.js"></script>
-<script src="js/sim.js"></script>
-<script src="js/canvas.js"></script>
-<script src="js/terminal.js"></script>
-<script src="js/windows.js"></script>
-<script src="js/app.js"></script>
+<script src="js/util.js?v=2"></script>
+<script src="js/model.js?v=2"></script>
+<script src="js/icons.js?v=2"></script>
+<script src="js/sim.js?v=2"></script>
+<script src="js/canvas.js?v=2"></script>
+<script src="js/notes.js?v=2"></script>
+<script src="js/terminal.js?v=2"></script>
+<script src="js/windows.js?v=2"></script>
+<script src="js/app.js?v=2"></script>
 </body>
 </html>

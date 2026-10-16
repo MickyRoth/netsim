@@ -32,9 +32,12 @@ function longPortName(n) {
   return String(n).replace(/^Fa/, 'FastEthernet').replace(/^Gi/, 'GigabitEthernet');
 }
 
+const NOTE_DEFAULTS = { color: '#1f2933', size: 16, bold: false, italic: false };
+
 const Model = {
   devices: [],
   links: [],
+  notes: [],   // Textfelder auf der Arbeitsfläche
   seq: 1,
   listeners: [],
 
@@ -118,6 +121,20 @@ const Model = {
     this.changed('unlink');
   },
 
+  getNote(id) { return this.notes.find(n => n.id === id) || null; },
+
+  addNote(x, y, text = 'Text') {
+    const n = Object.assign({ id: this.newId('n'), x: Math.round(x), y: Math.round(y), text }, NOTE_DEFAULTS);
+    this.notes.push(n);
+    this.changed('add');
+    return n;
+  },
+
+  removeNote(id) {
+    this.notes = this.notes.filter(n => n.id !== id);
+    this.changed('remove');
+  },
+
   onChange(fn) { this.listeners.push(fn); },
 
   /** Nach jeder Änderung aufrufen: aktualisiert DHCP und benachrichtigt die Oberfläche. */
@@ -127,7 +144,7 @@ const Model = {
   },
 
   serialize() {
-    return { format: 'netsim', version: 1, devices: this.devices, links: this.links };
+    return { format: 'netsim', version: 1, devices: this.devices, links: this.links, notes: this.notes };
   },
 
   /** Lädt ein (z. B. aus JSON gelesenes) Netzwerk. Fehlende Felder werden mit Standardwerten ergänzt. */
@@ -187,10 +204,21 @@ const Model = {
       links.push({ id: l.id, a: { dev: l.a.dev, port: l.a.port }, b: { dev: l.b.dev, port: l.b.port } });
     }
 
+    const notes = (Array.isArray(data.notes) ? data.notes : [])
+      .filter(n => n && typeof n.id === 'string')
+      .map(n => ({
+        id: n.id, x: Number(n.x) || 0, y: Number(n.y) || 0,
+        text: String(n.text == null ? '' : n.text),
+        color: /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : NOTE_DEFAULTS.color,
+        size: clamp(Number(n.size) || NOTE_DEFAULTS.size, 8, 96),
+        bold: !!n.bold, italic: !!n.italic,
+      }));
+
     this.devices = devices;
     this.links = links;
+    this.notes = notes;
     let max = 0;
-    for (const o of [...devices, ...links]) {
+    for (const o of [...devices, ...links, ...notes]) {
       const n = parseInt(String(o.id).replace(/\D/g, ''), 10);
       if (n > max) max = n;
     }

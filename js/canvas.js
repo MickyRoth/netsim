@@ -20,6 +20,7 @@ const Canvas = {
     this.svg = document.getElementById('ws');
     this.vp = document.getElementById('viewport');
     this.gLinks = document.getElementById('layer-links');
+    this.gNotes = document.getElementById('layer-notes');
     this.gDevs = document.getElementById('layer-devices');
     this.gOver = document.getElementById('layer-overlay');
     this.grid = document.getElementById('grid');
@@ -45,6 +46,7 @@ const Canvas = {
     });
     s.addEventListener('drop', e => {
       const type = e.dataTransfer.getData('application/x-netsim');
+      if (type === 'text') { e.preventDefault(); this.addNoteAt(e.clientX, e.clientY); return; }
       if (!DEVICE_TYPES[type]) return;
       e.preventDefault();
       this.addDeviceAt(type, e.clientX, e.clientY);
@@ -60,6 +62,15 @@ const Canvas = {
     this.select('device', d.id);
     App.status(`${d.name} hinzugefügt – Doppelklick zum Konfigurieren, Anschlüsse mit der Maus verbinden.`);
     return d;
+  },
+
+  /** Neues Textfeld einfügen und sofort den Formatierungs-Editor öffnen. */
+  addNoteAt(clientX, clientY) {
+    const w = this.toWorld(clientX, clientY);
+    const n = Model.addNote(snap(w.x - 20), snap(w.y - 10));
+    this.select('note', n.id);
+    NoteEditor.open(n, true);
+    return n;
   },
 
   /* ---------------- Koordinaten & Ansicht ---------------- */
@@ -80,6 +91,7 @@ const Canvas = {
     this.vp.setAttribute('transform', tf);
     this.grid.setAttribute('patternTransform', tf);
     if (this.onView) this.onView();
+    NoteEditor.reposition();
   },
 
   zoomAt(f, cx, cy) {
@@ -98,7 +110,7 @@ const Canvas = {
 
   /** Bereich, den alle Geräte inkl. Beschriftung belegen. */
   contentBounds() {
-    if (!Model.devices.length) return null;
+    if (!Model.devices.length && !Model.notes.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const d of Model.devices) {
       const t = DEVICE_TYPES[d.type];
@@ -106,6 +118,13 @@ const Canvas = {
       y0 = Math.min(y0, d.y - 30);
       x1 = Math.max(x1, d.x + t.w + (d.type === 'switch' ? 80 : 30));
       y1 = Math.max(y1, d.y + t.h + 45);
+    }
+    for (const n of Model.notes) {
+      const lines = n.text.split('\n');
+      x0 = Math.min(x0, n.x - 10);
+      y0 = Math.min(y0, n.y - 10);
+      x1 = Math.max(x1, n.x + Math.max(...lines.map(l => l.length)) * n.size * 0.6 + 10);
+      y1 = Math.max(y1, n.y + lines.length * n.size * 1.25 + 10);
     }
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   },
@@ -123,12 +142,45 @@ const Canvas = {
 
   render() {
     if (this.sel) {
-      const exists = this.sel.kind === 'device' ? Model.get(this.sel.id) : Model.links.some(l => l.id === this.sel.id);
+      const exists = this.sel.kind === 'device' ? Model.get(this.sel.id)
+        : this.sel.kind === 'note' ? Model.getNote(this.sel.id)
+        : Model.links.some(l => l.id === this.sel.id);
       if (!exists) this.sel = null;
     }
     this.renderLinks();
+    this.renderNotes();
     this.renderDevices();
-    document.getElementById('empty-hint').hidden = Model.devices.length > 0;
+    document.getElementById('empty-hint').hidden = Model.devices.length > 0 || Model.notes.length > 0;
+    NoteEditor.reposition();
+  },
+
+  renderNotes() {
+    this.gNotes.innerHTML = Model.notes.map(n =>
+      `<g class="note" data-id="${n.id}" transform="translate(${n.x},${n.y})">${this.noteText(n)}</g>`).join('');
+    // Unsichtbare Klickfläche bzw. Auswahlrahmen in Textgröße
+    for (const g of this.gNotes.children) {
+      const t = g.querySelector('text');
+      const b = t.getBBox();
+      const selected = this.sel && this.sel.kind === 'note' && this.sel.id === g.dataset.id;
+      const r = document.createElementNS(SVGNS, 'rect');
+      const pad = 5;
+      const attrs = {
+        class: 'no-export', x: b.x - pad, y: b.y - pad, rx: 4,
+        width: Math.max(b.width, 10) + 2 * pad, height: Math.max(b.height, 10) + 2 * pad,
+        fill: selected ? '#3b82f6' : 'transparent', 'fill-opacity': selected ? 0.08 : 1,
+        stroke: selected ? '#3b82f6' : 'none', 'stroke-width': 1.5, 'stroke-dasharray': '5 3',
+      };
+      for (const k in attrs) r.setAttribute(k, attrs[k]);
+      g.insertBefore(r, t);
+    }
+  },
+
+  noteText(n) {
+    const lh = (n.size * 1.25).toFixed(1);
+    const tspans = (n.text || '').split('\n').map((l, i) =>
+      `<tspan x="0"${i ? ` dy="${lh}"` : ''}>${esc(l) || ' '}</tspan>`).join('');
+    return `<text x="0" y="${n.size}" font-size="${n.size}" fill="${n.color}" font-weight="${n.bold ? 700 : 400}" ` +
+      `font-style="${n.italic ? 'italic' : 'normal'}" ${HALO}>${tspans}</text>`;
   },
 
   renderDevices() {
@@ -247,6 +299,10 @@ const Canvas = {
     if (s.kind === 'device') {
       const d = Model.get(s.id);
       if (d) { Win.close(d.id); Model.removeDevice(d.id); App.status(`${d.name} gelöscht.`); }
+    } else if (s.kind === 'note') {
+      NoteEditor.close(false);
+      Model.removeNote(s.id);
+      App.status('Text gelöscht.');
     } else {
       Model.removeLink(s.id);
       App.status('Verbindung gelöscht.');
@@ -259,10 +315,12 @@ const Canvas = {
     const devEl = target.closest('.device');
     const portEl = target.closest('.port');
     const linkEl = target.closest('.link');
+    const noteEl = target.closest('.note');
     return {
       dev: devEl ? Model.get(devEl.dataset.id) : null,
       port: portEl ? Number(portEl.dataset.port) : null,
       link: linkEl ? Model.links.find(l => l.id === linkEl.dataset.id) : null,
+      note: noteEl ? Model.getNote(noteEl.dataset.id) : null,
     };
   },
 
@@ -300,23 +358,29 @@ const Canvas = {
       return;
     }
 
-    if (h.dev) {
+    // Gerät oder Textfeld: Klick wählt aus und verschiebt, Doppelklick öffnet Fenster bzw. Texteditor
+    const obj = h.dev || h.note;
+    if (obj) {
+      const kind = h.dev ? 'device' : 'note';
       const now = performance.now();
-      if (this.lastClick.id === h.dev.id && now - this.lastClick.t < 400) {
+      if (this.lastClick.id === obj.id && now - this.lastClick.t < 400) {
         this.lastClick = { id: null, t: 0 };
-        Win.open(h.dev);
+        if (kind === 'device') Win.open(obj); else NoteEditor.open(obj);
         return;
       }
-      this.lastClick = { id: h.dev.id, t: now };
-      if (!(this.sel && this.sel.kind === 'device' && this.sel.id === h.dev.id)) this.select('device', h.dev.id);
+      this.lastClick = { id: obj.id, t: now };
+      if (NoteEditor.note && NoteEditor.note !== obj) NoteEditor.close();
+      if (!(this.sel && this.sel.kind === kind && this.sel.id === obj.id)) this.select(kind, obj.id);
       const w = this.toWorld(e.clientX, e.clientY);
       this.drag = {
-        mode: 'move', dev: h.dev, ox: w.x - h.dev.x, oy: w.y - h.dev.y, moved: false,
-        el: this.gDevs.querySelector(`[data-id="${h.dev.id}"]`),
+        mode: 'move', obj, kind, ox: w.x - obj.x, oy: w.y - obj.y, moved: false,
+        el: (kind === 'device' ? this.gDevs : this.gNotes).querySelector(`[data-id="${obj.id}"]`),
       };
       this.svg.setPointerCapture(e.pointerId);
       return;
     }
+
+    NoteEditor.close();
 
     if (h.link) { this.select('link', h.link.id); return; }
 
@@ -340,10 +404,11 @@ const Canvas = {
     } else if (d.mode === 'move') {
       const w = this.toWorld(e.clientX, e.clientY);
       const nx = snap(w.x - d.ox), ny = snap(w.y - d.oy);
-      if (nx !== d.dev.x || ny !== d.dev.y) {
-        d.dev.x = nx; d.dev.y = ny; d.moved = true;
+      if (nx !== d.obj.x || ny !== d.obj.y) {
+        d.obj.x = nx; d.obj.y = ny; d.moved = true;
         if (d.el) d.el.setAttribute('transform', `translate(${nx},${ny})`);
-        this.renderLinks();
+        if (d.kind === 'device') this.renderLinks();
+        else NoteEditor.reposition();
       }
     } else if (d.mode === 'link') {
       const w = this.toWorld(e.clientX, e.clientY);
@@ -403,16 +468,28 @@ const Canvas = {
       } });
       items.push({ label: 'Löschen', danger: true, action: () => { this.select('device', d.id); this.deleteSelection(); } });
       App.showMenu(e.clientX, e.clientY, items);
+    } else if (h.note) {
+      const n = h.note;
+      this.select('note', n.id);
+      App.showMenu(e.clientX, e.clientY, [
+        { label: 'Text bearbeiten / formatieren …', action: () => NoteEditor.open(n) },
+        '-',
+        { label: 'Löschen', danger: true, action: () => { this.select('note', n.id); this.deleteSelection(); } },
+      ]);
     } else if (h.link) {
       this.select('link', h.link.id);
       App.showMenu(e.clientX, e.clientY, [
         { label: 'Verbindung löschen', danger: true, action: () => { this.select('link', h.link.id); this.deleteSelection(); } },
       ]);
     } else {
-      App.showMenu(e.clientX, e.clientY, Object.keys(DEVICE_TYPES).map(type => ({
-        label: `${DEVICE_TYPES[type].label} hier einfügen`,
-        action: () => this.addDeviceAt(type, e.clientX, e.clientY),
-      })));
+      App.showMenu(e.clientX, e.clientY, [
+        ...Object.keys(DEVICE_TYPES).map(type => ({
+          label: `${DEVICE_TYPES[type].label} hier einfügen`,
+          action: () => this.addDeviceAt(type, e.clientX, e.clientY),
+        })),
+        '-',
+        { label: 'Text hier einfügen', action: () => this.addNoteAt(e.clientX, e.clientY) },
+      ]);
     }
   },
 
@@ -472,7 +549,7 @@ const Canvas = {
     this.svg.classList.add('exporting');
     let box = null;
     try {
-      for (const g of [this.gLinks, this.gDevs]) {
+      for (const g of [this.gLinks, this.gDevs, this.gNotes]) {
         if (!g.childNodes.length) continue;
         const b = g.getBBox();
         if (!b.width && !b.height) continue;
@@ -496,7 +573,7 @@ const Canvas = {
     };
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${x} ${y} ${w} ${h}" ` +
       `font-family="Segoe UI, Arial, Helvetica, sans-serif"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ffffff"/>` +
-      `${part(this.gLinks)}${part(this.gDevs)}</svg>`;
+      `${part(this.gLinks)}${part(this.gDevs)}${part(this.gNotes)}</svg>`;
     return { svg, w, h };
   },
 

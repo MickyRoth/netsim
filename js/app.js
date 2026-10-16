@@ -5,7 +5,13 @@
 const PALETTE = [
   { group: 'Endgeräte', items: ['pc', 'server'] },
   { group: 'Netzwerkgeräte', items: ['switch', 'router'] },
+  { group: 'Werkzeuge', items: ['text'] },
 ];
+
+const TEXT_TOOL_SVG = `<svg viewBox="0 0 64 40" width="64" height="40" aria-hidden="true">
+  <rect x="1" y="1" width="62" height="38" rx="5" fill="#ffffff" stroke="#94a3b8" stroke-dasharray="4 3"/>
+  <text x="32" y="28" text-anchor="middle" font-size="22" font-family="Georgia, 'Times New Roman', serif" fill="#1f2933"><tspan font-weight="700">A</tspan><tspan font-style="italic" fill="#2563eb">a</tspan></text>
+</svg>`;
 
 const App = {
   fileName: 'Unbenannt',
@@ -17,6 +23,7 @@ const App = {
 
   init() {
     Canvas.init();
+    NoteEditor.init();
     Canvas.onView = () => this.updateInfo();
     this.buildPalette();
     document.querySelectorAll('[data-icon]').forEach(b => b.insertAdjacentHTML('afterbegin', Icons.ui(b.dataset.icon)));
@@ -29,7 +36,7 @@ const App = {
       const s = localStorage.getItem('netsim.autosave');
       if (s) {
         const data = JSON.parse(s);
-        if (data && Array.isArray(data.devices) && data.devices.length) {
+        if (data && Array.isArray(data.devices) && (data.devices.length || (data.notes && data.notes.length))) {
           Model.load(data, 'init');
           this.setFileName(localStorage.getItem('netsim.filename') || 'Unbenannt');
           restored = true;
@@ -92,6 +99,11 @@ const App = {
     for (const g of PALETTE) {
       html += `<div class="pal-group">${esc(g.group)}</div>`;
       for (const type of g.items) {
+        if (type === 'text') {
+          html += `<div class="pal-item pal-tool" draggable="true" data-type="text" title="Text – auf die Arbeitsfläche ziehen oder anklicken, danach formatieren">` +
+            `${TEXT_TOOL_SVG}<span>Text</span><small>Beschriftung</small></div>`;
+          continue;
+        }
         const t = DEVICE_TYPES[type];
         const [main, sub] = t.label.split(' (');
         html += `<div class="pal-item" draggable="true" data-type="${type}" title="${esc(t.label)} – auf die Arbeitsfläche ziehen oder anklicken">` +
@@ -111,6 +123,10 @@ const App = {
       item.addEventListener('click', () => {
         const r = Canvas.svg.getBoundingClientRect();
         const off = (this.addCount++ % 6) * 30;
+        if (item.dataset.type === 'text') {
+          Canvas.addNoteAt(r.left + r.width / 2 + off - 75, r.top + r.height / 2 + off - 75);
+          return;
+        }
         Canvas.addDeviceAt(item.dataset.type, r.left + r.width / 2 + off - 75, r.top + r.height / 2 + off - 75);
       });
     });
@@ -180,6 +196,7 @@ const App = {
       if (mod && k === 'o') { e.preventDefault(); this.open(); return; }
       if (e.key === 'F1') { e.preventDefault(); document.getElementById('help').hidden = false; return; }
       if (e.key === 'Escape') {
+        NoteEditor.close();
         this.hideMenu();
         Canvas.cancelDrag();
         document.getElementById('help').hidden = true;
@@ -296,7 +313,7 @@ const App = {
   /* ---------------- Export ---------------- */
 
   async copyImage() {
-    if (!Model.devices.length) { this.toast('Das Netzwerk ist leer.', 'warn'); return; }
+    if (!Model.devices.length && !Model.notes.length) { this.toast('Das Netzwerk ist leer.', 'warn'); return; }
     try {
       if (!navigator.clipboard || !window.ClipboardItem) throw new Error('Zwischenablage wird von diesem Browser nicht unterstützt');
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': Canvas.renderPNG(2) })]);
@@ -313,7 +330,7 @@ const App = {
   },
 
   async exportPNG() {
-    if (!Model.devices.length) { this.toast('Das Netzwerk ist leer.', 'warn'); return; }
+    if (!Model.devices.length && !Model.notes.length) { this.toast('Das Netzwerk ist leer.', 'warn'); return; }
     try {
       this.download(await Canvas.renderPNG(2), this.baseName() + '.png');
     } catch (e) {
