@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetSim – Netzwerksimulation</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d3557'/%3E%3Cpath d='M16 8v8M8 24v-8h16v8' fill='none' stroke='%2393c5fd' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='7' r='3' fill='%23fff'/%3E%3Ccircle cx='8' cy='25' r='3' fill='%23fff'/%3E%3Ccircle cx='24' cy='25' r='3' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/netsim.css">
+</head>
+<body>
+
+<header id="toolbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#2a4d7a"/>
+      <path d="M16 8v8M8 24v-8h16v8" fill="none" stroke="#93c5fd" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="16" cy="7" r="3" fill="#fff"/><circle cx="8" cy="25" r="3" fill="#fff"/><circle cx="24" cy="25" r="3" fill="#fff"/>
+    </svg>
+    <span class="brand-name">NetSim</span>
+    <span class="brand-file" id="file-name">Unbenannt</span>
+  </div>
+  <nav class="tb">
+    <button class="tb-btn" data-cmd="new" data-icon="new" title="Neues, leeres Netzwerk">Neu</button>
+    <button class="tb-btn" data-cmd="open" data-icon="open" title="Netzwerk öffnen (Strg+O)">Öffnen</button>
+    <button class="tb-btn" data-cmd="save" data-icon="save" title="Speichern (Strg+S) – mit Umschalt: Speichern unter">Speichern</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn icon-only" data-cmd="undo" data-icon="undo" title="Rückgängig (Strg+Z)"></button>
+    <button class="tb-btn icon-only" data-cmd="redo" data-icon="redo" title="Wiederholen (Strg+Y)"></button>
+    <button class="tb-btn icon-only" data-cmd="delete" data-icon="trash" title="Auswahl löschen (Entf)"></button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" data-cmd="copy-image" data-icon="copy" title="Netzwerk als Grafik in die Zwischenablage kopieren">Als Grafik kopieren</button>
+    <button class="tb-btn" data-cmd="export-png" data-icon="image" title="Netzwerk als PNG-Datei speichern">PNG</button>
+    <button class="tb-btn" data-cmd="export-svg" data-icon="download" title="Netzwerk als SVG-Datei (Vektorgrafik) speichern">SVG</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" data-cmd="demo" data-icon="network" title="Beispielnetzwerk laden">Beispiel</button>
+  </nav>
+  <div class="tb-right">
+    <label class="tb-check"><input type="checkbox" id="opt-ports" checked> Portnamen</label>
+    <label class="tb-check"><input type="checkbox" id="opt-ip" checked> IP-Adressen</label>
+    <label class="tb-check"><input type="checkbox" id="opt-anim" checked> Paketanimation</label>
+    <button class="tb-btn icon-only" data-cmd="help" data-icon="help" title="Hilfe (F1)"></button>
+  </div>
+</header>
+
+<main id="main">
+  <aside id="palette" aria-label="Geräte"></aside>
+  <section id="stage">
+    <svg id="ws" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="grid-s" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M20 0H0V20" fill="none" stroke="#edf1f5" stroke-width="1"/>
+        </pattern>
+        <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+          <rect width="100" height="100" fill="url(#grid-s)"/>
+          <path d="M100 0H0V100" fill="none" stroke="#dfe5ec" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect id="ws-grid" width="100%" height="100%" fill="url(#grid)"/>
+      <g id="viewport">
+        <g id="layer-links"></g>
+        <g id="layer-devices"></g>
+        <g id="layer-overlay"></g>
+      </g>
+    </svg>
+    <div id="empty-hint">
+      <div class="eh-title">Willkommen bei NetSim</div>
+      <div>Ziehen Sie Geräte aus der linken Leiste auf die Arbeitsfläche<br>und verbinden Sie die Anschlüsse mit der Maus.</div>
+      <button class="btn" data-cmd="demo">Beispielnetzwerk laden</button>
+    </div>
+    <div id="zoombar">
+      <button data-cmd="zoom-out" data-icon="zoomOut" title="Verkleinern (-)"></button>
+      <button data-cmd="zoom-reset" id="zoom-label" title="Zoom auf 100 %">100 %</button>
+      <button data-cmd="zoom-in" data-icon="zoomIn" title="Vergrößern (+)"></button>
+      <button data-cmd="fit" data-icon="fit" title="Alles einpassen"></button>
+    </div>
+  </section>
+</main>
+
+<footer id="statusbar">
+  <span id="status-text">Bereit.</span>
+  <span id="status-info"></span>
+</footer>
+
+<div id="windows"></div>
+<div id="ctxmenu" hidden></div>
+<div id="toasts"></div>
+
+<div id="help" class="modal" hidden>
+  <div class="modal-box">
+    <button class="modal-close" data-cmd="help-close" title="Schließen">✕</button>
+    <h2>NetSim – Kurzanleitung</h2>
+    <ul>
+      <li><b>Gerät hinzufügen:</b> aus der linken Leiste auf die Arbeitsfläche ziehen (oder einfach anklicken).</li>
+      <li><b>Verkabeln:</b> mit gedrückter Maustaste von einem Anschluss (kleines Quadrat) zu einem freien Anschluss eines anderen Geräts ziehen. Grün = verbunden, rot = Port deaktiviert.</li>
+      <li><b>Konfigurieren:</b> Doppelklick auf ein Gerät (oder Rechtsklick → Konfigurieren).</li>
+      <li><b>PC / Server:</b> IP-Adresse, Subnetzmaske, Gateway oder DHCP. Ein Server kann zusätzlich als DHCP-Server dienen (Reiter „Dienste“).</li>
+      <li><b>Switch:</b> VLANs anlegen und den Ports zuordnen (Access) oder Ports als Trunk zwischen Switches betreiben.</li>
+      <li><b>Router:</b> 3 Schnittstellen mit IP/Maske, statische Routen z.&nbsp;B. <code>192.168.1.0/24 via 192.168.2.254</code>.</li>
+      <li><b>Testen:</b> im Terminal eines PCs/Servers <code>ping 192.168.1.1</code>, <code>tracert 10.0.0.10</code>, <code>ipconfig</code>; in der Router-CLI <code>ping</code>, <code>show ip route</code>, <code>show ip interface brief</code>.</li>
+      <li><b>Ansicht:</b> leere Fläche ziehen = verschieben, Mausrad = zoomen.</li>
+    </ul>
+    <h3>Tastenkürzel</h3>
+    <table class="keys">
+      <tr><td><kbd>Entf</kbd></td><td>Ausgewähltes Gerät / Kabel löschen</td></tr>
+      <tr><td><kbd>Strg</kbd>+<kbd>Z</kbd> / <kbd>Strg</kbd>+<kbd>Y</kbd></td><td>Rückgängig / Wiederholen</td></tr>
+      <tr><td><kbd>Strg</kbd>+<kbd>S</kbd> / <kbd>Strg</kbd>+<kbd>O</kbd></td><td>Speichern / Öffnen</td></tr>
+      <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoomen</td></tr>
+    </table>
+    <p class="meta">Die Arbeit wird zusätzlich automatisch im Browser zwischengespeichert.</p>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept=".netsim,.json,application/json" hidden>
+
+<script src="js/util.js"></script>
+<script src="js/model.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/canvas.js"></script>
+<script src="js/terminal.js"></script>
+<script src="js/windows.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
