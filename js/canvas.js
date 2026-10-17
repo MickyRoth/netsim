@@ -233,7 +233,7 @@ const Canvas = {
         return b && b.isRoot && b.members > 1;
       });
       if (rootIn.length) {
-        s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="10.5" font-weight="600" fill="#b45309" ${HALO}>★ Root-Bridge (VLAN ${rootIn.join(', ')})</text>`;
+        s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="9.5" font-weight="600" fill="#b45309" ${HALO}>★ Root-Bridge</text>`;
       }
     } else if (d.type === 'switch') {
       s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="10.5" fill="#64748b" ${HALO}>STP aus</text>`;
