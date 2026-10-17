@@ -233,6 +233,14 @@ fieldset.box legend { font-weight: 600; padding: 0 5px; color: #2c3a4a; }
 .badge.C { background: #16a34a; }
 .badge.S { background: #2563eb; }
 
+.kv { border-collapse: collapse; }
+.kv th { text-align: left; font-weight: 600; color: #45505c; padding: 2px 14px 2px 0; white-space: nowrap; vertical-align: top; }
+.kv td { padding: 2px 0; }
+.stp-state { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 1px 6px; color: #fff; }
+.stp-state.fwd { background: var(--ok); }
+.stp-state.blk { background: #f59e0b; }
+.stp-root { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: #b45309; background: #fef3c7; border-radius: 4px; padding: 1px 6px; }
+
 /* ---------- Terminal ---------- */
 
 .term {

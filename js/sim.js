@@ -79,16 +79,11 @@ const Sim = {
       if (!p || !this.portUp(p.dev, p.port)) return;
       const nh = hops.concat([{ link: p.link.id, from: fromDev.id, to: p.dev.id }]);
       if (p.dev.type === 'switch') {
-        const sp = p.dev.ports[p.port];
-        let vlan;
-        if (sp.mode === 'trunk') vlan = tag == null ? 1 : tag;
-        else {
-          if (tag != null) return; // getaggter Frame an Access-Port wird verworfen
-          vlan = sp.vlan;
-        }
-        if (!p.dev.vlans.some(v => v.id === vlan)) return;
+        const vlan = this.ingressVlan(p.dev, p.port, tag);
+        if (vlan === null || this.stpBlocked(p.dev, p.port, vlan)) return;
         const key = p.dev.id + ':' + vlan;
-        if (visited.has(key)) return;
+        // Derselbe Switch wird über einen zweiten Weg erreicht: Schleife → Broadcast-Sturm
+        if (visited.has(key)) { result.loop = true; return; }
         visited.add(key);
         queue.push({ sw: p.dev, vlan, inPort: p.port, hops: nh });
       } else {
@@ -101,14 +96,217 @@ const Sim = {
     cross(dev, portIdx, null, []);
     while (queue.length) {
       const { sw, vlan, inPort, hops } = queue.shift();
-      sw.ports.forEach((sp, i) => {
-        if (i === inPort) return;
-        if (sp.mode !== 'trunk' && sp.vlan !== vlan) return;
-        const tag = sp.mode === 'trunk' && vlan !== 1 ? vlan : null;
-        cross(sw, i, tag, hops);
+      sw.ports.forEach((_, i) => {
+        if (i === inPort || !this.carries(sw, i, vlan) || this.stpBlocked(sw, i, vlan)) return;
+        cross(sw, i, this.egressTag(sw, i, vlan), hops);
       });
     }
     return result;
+  },
+
+  /* ---------------- Switch-Hilfen (VLAN) ---------------- */
+
+  /** Überträgt Switchport i Frames von VLAN v? (Access: genau ein VLAN, Trunk: alle VLANs des Switches) */
+  carries(sw, i, v) {
+    const p = sw.ports[i];
+    return p.mode === 'trunk' ? sw.vlans.some(x => x.id === v) : p.vlan === v;
+  },
+
+  /** VLAN eines an Switchport i ankommenden Frames (tag = VLAN-Tag oder null), null = verworfen. */
+  ingressVlan(sw, i, tag) {
+    const sp = sw.ports[i];
+    let vlan;
+    if (sp.mode === 'trunk') vlan = tag == null ? 1 : tag;
+    else {
+      if (tag != null) return null; // getaggter Frame an Access-Port wird verworfen
+      vlan = sp.vlan;
+    }
+    return sw.vlans.some(v => v.id === vlan) ? vlan : null;
+  },
+
+  /** Tag beim Senden aus Port i (Trunk: getaggt außer natives VLAN 1). */
+  egressTag(sw, i, v) { return sw.ports[i].mode === 'trunk' && v !== 1 ? v : null; },
+
+  /* ---------------- Spanning Tree (PVST+, je VLAN eine Instanz) ---------------- */
+
+  STP_COST: 19,          // Pfadkosten FastEthernet (100 Mbit/s, Kurzverfahren)
+  STP_PORT_PRIO: 128,
+  _stp: null,
+
+  invalidate() { this._stp = null; },
+
+  stpOn(d) { return d.type === 'switch' && !!d.stp && d.stp.enabled; },
+
+  /** Berechneter (konvergierter) STP-Zustand; wird nach jeder Änderung neu ermittelt. */
+  stpData() {
+    if (!this._stp) {
+      this._stp = this.computeStp();
+      this._stp.loops = this.computeLoops();
+    }
+    return this._stp;
+  },
+
+  bridgeId(sw, v) { return { prio: sw.stp.priority + v, mac: this.mac(sw) }; },
+
+  cmpBid(a, b) { return (a.prio - b.prio) || (a.mac < b.mac ? -1 : a.mac > b.mac ? 1 : 0); },
+
+  stpPort(sw, i, v) {
+    const vd = this.stpData().vlans[v];
+    return vd ? vd.ports.get(sw.id + ':' + i) || null : null;
+  },
+
+  stpBlocked(sw, i, v) {
+    if (!this.stpOn(sw)) return false;
+    const p = this.stpPort(sw, i, v);
+    return !!p && p.state === 'blocking';
+  },
+
+  /** VLANs, in denen Switchport i blockiert. */
+  stpBlockedVlans(sw, i) {
+    if (!this.stpOn(sw)) return [];
+    return sw.vlans.map(v => v.id).filter(v => this.stpBlocked(sw, i, v));
+  },
+
+  /**
+   * Andere STP-Ports im selben Segment wie (sw, i) für VLAN v. Switches mit deaktiviertem STP
+   * sind dabei transparent (sie reichen BPDUs wie normale Frames weiter).
+   */
+  stpSegment(sw, i, v) {
+    const out = [], seen = new Set(), queue = [];
+    const cross = (d, port, tag) => {
+      const p = this.peer(d, port);
+      if (!p || !this.portUp(d, port) || !this.portUp(p.dev, p.port) || p.dev.type !== 'switch') return;
+      const vlan = this.ingressVlan(p.dev, p.port, tag);
+      if (vlan === null) return;
+      if (this.stpOn(p.dev)) {
+        if (vlan === v && !(p.dev === sw && p.port === i)) out.push(p.dev.id + ':' + p.port);
+        return;
+      }
+      const key = p.dev.id + ':' + vlan;
+      if (seen.has(key)) return;
+      seen.add(key);
+      queue.push({ d: p.dev, vlan, inPort: p.port });
+    };
+    cross(sw, i, this.egressTag(sw, i, v));
+    while (queue.length) {
+      const { d, vlan, inPort } = queue.shift();
+      d.ports.forEach((_, j) => { if (j !== inPort && this.carries(d, j, vlan)) cross(d, j, this.egressTag(d, j, vlan)); });
+    }
+    return out;
+  },
+
+  /**
+   * Konvergierter Zustand nach IEEE 802.1D je VLAN:
+   * Root-Bridge = kleinste Bridge-ID, je Bridge ein Root-Port (geringste Pfadkosten zur Root),
+   * je Segment ein Designated-Port, alle übrigen Ports blockieren (Alternate/Backup).
+   */
+  computeStp() {
+    const res = { vlans: {} };
+    const switches = Model.devices.filter(d => this.stpOn(d));
+    const vids = [...new Set(switches.flatMap(s => s.vlans.map(v => v.id)))].sort((a, b) => a - b);
+    const cmpKey = (a, b) => (a[0] - b[0]) || this.cmpBid(a[1], b[1]) || (a[2] - b[2]) || (a[3] - b[3]);
+
+    for (const v of vids) {
+      const bridges = switches.filter(s => s.vlans.some(x => x.id === v));
+      const ports = new Map();
+      for (const s of bridges) {
+        s.ports.forEach((_, i) => {
+          if (!this.carries(s, i, v)) return;
+          const active = !!this.peer(s, i);
+          ports.set(s.id + ':' + i, {
+            sw: s, port: i, pid: this.STP_PORT_PRIO * 256 + i + 1, cost: this.STP_COST,
+            active, nbrs: active ? this.stpSegment(s, i, v) : [], role: 'disabled', state: 'disabled',
+          });
+        });
+      }
+      for (const p of ports.values()) p.nbrs = p.nbrs.filter(k => ports.has(k)).map(k => ports.get(k));
+
+      const bid = new Map(bridges.map(s => [s.id, this.bridgeId(s, v)]));
+
+      // Zusammenhängende Bereiche und deren Root-Bridge
+      const rootOf = new Map(), members = new Map();
+      for (const s of bridges) {
+        if (rootOf.has(s.id)) continue;
+        const comp = [s], seen = new Set([s.id]);
+        for (let k = 0; k < comp.length; k++) {
+          for (const p of ports.values()) {
+            if (p.sw !== comp[k]) continue;
+            for (const q of p.nbrs) if (!seen.has(q.sw.id)) { seen.add(q.sw.id); comp.push(q.sw); }
+          }
+        }
+        const root = comp.reduce((a, b) => (this.cmpBid(bid.get(b.id), bid.get(a.id)) < 0 ? b : a));
+        for (const m of comp) { rootOf.set(m.id, root); members.set(m.id, comp.length); }
+      }
+
+      // Root-Pfadkosten (kürzeste Wege zur Root)
+      const dist = new Map(bridges.map(s => [s.id, rootOf.get(s.id) === s ? 0 : Infinity]));
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const p of ports.values()) {
+          for (const q of p.nbrs) {
+            const c = dist.get(q.sw.id) + p.cost;
+            if (c < dist.get(p.sw.id)) { dist.set(p.sw.id, c); changed = true; }
+          }
+        }
+      }
+
+      // Designated-Port je Segment: beste (Root-Kosten, Bridge-ID, Port-ID)
+      const better = (a, b) => (dist.get(a.sw.id) - dist.get(b.sw.id)) ||
+        this.cmpBid(bid.get(a.sw.id), bid.get(b.sw.id)) || (a.pid - b.pid);
+      for (const p of ports.values()) {
+        if (!p.active) continue;
+        p.des = p.nbrs.reduce((d, q) => (better(q, d) < 0 ? q : d), p);
+      }
+
+      // Root-Port je Bridge
+      const bridgeInfo = {};
+      for (const s of bridges) {
+        const root = rootOf.get(s.id);
+        let rp = null, rk = null;
+        if (root !== s) {
+          for (const p of ports.values()) {
+            if (p.sw !== s || !p.active || p.des.sw === s) continue;
+            const k = [dist.get(p.des.sw.id) + p.cost, bid.get(p.des.sw.id), p.des.pid, p.pid];
+            if (!rp || cmpKey(k, rk) < 0) { rp = p; rk = k; }
+          }
+        }
+        bridgeInfo[s.id] = {
+          bid: bid.get(s.id), rootBid: bid.get(root.id), rootId: root.id, isRoot: root === s,
+          rootCost: dist.get(s.id), rootPort: rp ? rp.port : null, members: members.get(s.id),
+        };
+      }
+
+      for (const p of ports.values()) {
+        if (!p.active) continue;
+        if (bridgeInfo[p.sw.id].rootPort === p.port) p.role = 'root';
+        else if (p.des === p) p.role = 'designated';
+        else if (p.des.sw === p.sw) p.role = 'backup';
+        else p.role = 'alternate';
+        p.state = p.role === 'root' || p.role === 'designated' ? 'forwarding' : 'blocking';
+      }
+      res.vlans[v] = { bridges: bridgeInfo, ports };
+    }
+    return res;
+  },
+
+  /** VLANs mit einer Schleife aus weiterleitenden Switchports (→ Broadcast-Sturm). */
+  computeLoops() {
+    const loops = new Set();
+    const parent = new Map();
+    const find = k => { while (parent.has(k) && parent.get(k) !== k) k = parent.get(k); return k; };
+    for (const l of Model.links) {
+      const A = Model.get(l.a.dev), B = Model.get(l.b.dev);
+      if (!A || !B || A.type !== 'switch' || B.type !== 'switch') continue;
+      for (const { id: v } of A.vlans) {
+        if (!this.carries(A, l.a.port, v) || this.stpBlocked(A, l.a.port, v)) continue;
+        const vb = this.ingressVlan(B, l.b.port, this.egressTag(A, l.a.port, v));
+        if (vb === null || this.stpBlocked(B, l.b.port, vb)) continue;
+        const ka = find(A.id + ':' + v), kb = find(B.id + ':' + vb);
+        if (ka === kb) loops.add(v);
+        else parent.set(ka, kb);
+      }
+    }
+    return loops;
   },
 
   /* ---------------- Routing ---------------- */
@@ -190,7 +388,9 @@ const Sim = {
       } else {
         return { status: 'timeout', dev: cur, hops, srcIp };
       }
-      const target = this.l2Reach(cur, outPort).find(e => {
+      const reach = this.l2Reach(cur, outPort);
+      if (reach.loop) return { status: 'timeout', storm: true, dev: cur, hops, srcIp };
+      const target = reach.find(e => {
         const f = this.portIp(e.dev, e.port);
         return f && f.ip === nh;
       });
@@ -222,7 +422,7 @@ const Sim = {
       await Canvas.animatePacket(rep.hops, '#2fbf71');
       Canvas.flashMark(ok ? src : (rep.dev || req.dev), ok);
     }
-    if (!ok) return { status: 'timeout' };
+    if (!ok) return { status: 'timeout', storm: !!rep.storm };
     return { status: 'ok', ttl: rep.ttl, time: Math.max(0, this.startTtl(req.dev) - rep.ttl) };
   },
 
@@ -234,7 +434,9 @@ const Sim = {
   },
 
   dhcpServers(d) {
-    return this.l2Reach(d, 0).map(e => e.dev)
+    const reach = this.l2Reach(d, 0);
+    if (reach.loop) return []; // Broadcast-Sturm: DHCP-Anfrage geht unter
+    return reach.map(e => e.dev)
       .filter(s => s.type === 'server' && s.dhcp.enabled && this.poolValid(s));
   },
 

@@ -66,6 +66,7 @@ const Model = {
         };
       case 'switch':
         return {
+          stp: { enabled: true, priority: 32768 },
           vlans: [{ id: 1, name: 'default' }],
           ports: t.ports.map(p => ({ name: p.name, mode: 'access', vlan: 1 })),
         };
@@ -139,6 +140,7 @@ const Model = {
 
   /** Nach jeder Änderung aufrufen: aktualisiert DHCP und benachrichtigt die Oberfläche. */
   changed(kind) {
+    Sim.invalidate();
     Sim.autoDhcp();
     for (const fn of this.listeners) fn(kind);
   },
@@ -182,6 +184,14 @@ const Model = {
           if (p.mode !== 'trunk') p.mode = 'access';
           if (!d.vlans.some(v => v.id === p.vlan)) p.vlan = 1;
         }
+      }
+      if (def.stp) {
+        const s = raw.stp || {};
+        const prio = Number(s.priority);
+        d.stp = {
+          enabled: s.enabled !== false,
+          priority: Number.isInteger(prio) && prio >= 0 && prio <= 61440 && prio % 4096 === 0 ? prio : 32768,
+        };
       }
       if (def.routes) {
         d.routes = (Array.isArray(raw.routes) ? raw.routes : []).map(r => ({

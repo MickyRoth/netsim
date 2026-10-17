@@ -37,6 +37,11 @@ class Terminal {
     this.updatePrompt();
   }
 
+  static stormHint() {
+    const v = [...Sim.stpData().loops];
+    App.toast(`Broadcast-Sturm: Schleife ohne Spanning Tree${v.length ? ' in VLAN ' + v.join(', ') : ''} – Pakete gehen verloren.`, 'warn');
+  }
+
   isRouter() { return this.dev.type === 'router'; }
   prompt() { return this.isRouter() ? this.dev.name + '#' : 'C:\\>'; }
   updatePrompt() { if (!this.busy) this.pr.textContent = this.prompt(); }
@@ -182,11 +187,12 @@ class Terminal {
       return;
     }
     this.println(`\nPinging ${target} with 32 bytes of data:\n`);
-    let sent = 0, recv = 0;
+    let sent = 0, recv = 0, storm = false;
     const times = [];
     for (let i = 0; i < count && !this.abort; i++) {
       const r = await Sim.ping(this.dev, dst, i === 0 && Canvas.settings.animate);
       sent++;
+      if (r.storm) storm = true;
       if (r.status === 'ok') {
         recv++;
         times.push(r.time);
@@ -213,6 +219,7 @@ class Terminal {
       this.println(`    Minimum = ${min}ms, Maximum = ${max}ms, Average = ${avg}ms`);
     }
     this.println('');
+    if (storm) Terminal.stormHint();
   }
 
   async tracert(target) {
@@ -278,11 +285,12 @@ class Terminal {
     if (dst === null) { this.println('% Unrecognized host or address.\n'); return; }
     this.println('Type escape sequence to abort.');
     this.println(`Sending 5, 100-byte ICMP Echos to ${target}, timeout is 2 seconds:`);
-    let ok = 0, sent = 0;
+    let ok = 0, sent = 0, storm = false;
     const times = [];
     for (let i = 0; i < 5 && !this.abort; i++) {
       const r = await Sim.ping(this.dev, dst, i === 0 && Canvas.settings.animate);
       sent++;
+      if (r.storm) storm = true;
       if (r.status === 'ok') { ok++; times.push(r.time); this.write('!'); }
       else if (r.status === 'unreach') this.write('U');
       else this.write('.');
@@ -295,6 +303,7 @@ class Terminal {
       s += `, round-trip min/avg/max = ${Math.min(...times)}/${avg}/${Math.max(...times)} ms`;
     }
     this.println(s + '\n');
+    if (storm) Terminal.stormHint();
   }
 
   async routerTrace(target) {

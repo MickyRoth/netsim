@@ -208,10 +208,12 @@ const Canvas = {
   portMarkup(d, i, p) {
     const peer = Sim.peer(d, i);
     const up = Sim.portUp(d, i);
-    const fill = !up ? '#ef4444' : peer ? '#22c55e' : '#f4f6f8';
+    const blocked = peer ? Sim.stpBlockedVlans(d, i) : [];
+    const fill = !up ? '#ef4444' : !peer ? '#f4f6f8' : blocked.length ? '#f59e0b' : '#22c55e';
     let title = `${longPortName(d.ports[i].name)} – ` +
       (peer ? `verbunden mit ${peer.dev.name} (${peer.dev.ports[peer.port].name})` : 'frei, zum Verbinden ziehen');
     if (!up) title += ' – deaktiviert';
+    if (blocked.length) title += ` – Spanning Tree: blockiert (VLAN ${blocked.join(', ')})`;
     return `<g class="port${peer ? ' used' : ''}" data-port="${i}" transform="translate(${p.x},${p.y})">` +
       `<circle class="no-export" r="9" fill="transparent"/>` +
       `<rect x="-5" y="-5" width="10" height="10" rx="2" fill="${fill}" stroke="#37474f" stroke-width="1.2"/>` +
@@ -223,6 +225,19 @@ const Canvas = {
     if (d.type === 'switch') { x = t.w + 10; y = t.h / 2 + 4; anchor = 'start'; }
     else if (d.type === 'router') { y = -9; }
     let s = `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="12" font-weight="600" fill="#1f2933" ${HALO}>${esc(d.name)}</text>`;
+    if (Sim.stpOn(d)) {
+      // Root-Bridge kennzeichnen (nur wenn mehrere STP-Switches zusammenhängen)
+      const vd = Sim.stpData().vlans;
+      const rootIn = d.vlans.map(v => v.id).filter(v => {
+        const b = vd[v] && vd[v].bridges[d.id];
+        return b && b.isRoot && b.members > 1;
+      });
+      if (rootIn.length) {
+        s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="10.5" font-weight="600" fill="#b45309" ${HALO}>★ Root-Bridge (VLAN ${rootIn.join(', ')})</text>`;
+      }
+    } else if (d.type === 'switch') {
+      s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="10.5" fill="#64748b" ${HALO}>STP aus</text>`;
+    }
     if (this.settings.showIP && Sim.isHost(d)) {
       const f = Sim.hostIface(d);
       let txt = f ? `${IP.str(f.ip)}/${IP.prefixLen(f.mask)}` : (d.ip.mode === 'dhcp' ? 'DHCP – keine Adresse' : 'keine IP');
@@ -267,7 +282,8 @@ const Canvas = {
       for (const e of ends) {
         if (free > 26) {
           const k = e.ex + 8;
-          s += `<circle cx="${(e.p.x + e.ux * k).toFixed(1)}" cy="${(e.p.y + e.uy * k).toFixed(1)}" r="3.6" fill="${ok ? '#22c55e' : '#ef4444'}" stroke="#ffffff" stroke-width="1"/>`;
+          const color = !ok ? '#ef4444' : Sim.stpBlockedVlans(e.dev, e.port).length ? '#f59e0b' : '#22c55e';
+          s += `<circle cx="${(e.p.x + e.ux * k).toFixed(1)}" cy="${(e.p.y + e.uy * k).toFixed(1)}" r="3.6" fill="${color}" stroke="#ffffff" stroke-width="1"/>`;
         }
         if (this.settings.portLabels && free > 90) {
           const k = e.ex + 30;

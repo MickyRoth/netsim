@@ -427,6 +427,84 @@ function vlanPane(dev) {
   };
 }
 
+const STP_ROLES = {
+  root: 'Root-Port', designated: 'Designated', alternate: 'Alternate', backup: 'Backup', disabled: 'Deaktiviert',
+};
+
+function bidText(b) { return `Priorität ${b.prio} · MAC ${b.mac}`; }
+
+function stpPane(dev) {
+  const prios = Array.from({ length: 16 }, (_, k) => k * 4096);
+  const el = makePane(`
+    <fieldset class="box">
+      <legend>Spanning Tree (PVST+)</legend>
+      <div class="row"><label>Spanning Tree</label><label class="chk"><input type="checkbox" data-f="enabled"> aktiviert</label></div>
+      <div class="row"><label>Bridge-Priorität</label>
+        <select data-f="prio">${prios.map(p => `<option value="${p}">${p}${p === 32768 ? ' (Standard)' : ''}</option>`).join('')}</select></div>
+      <p class="meta">Die kleinste Bridge-ID (Priorität, dann MAC-Adresse) wird Root-Bridge. Zur Priorität wird die
+        VLAN-Nummer addiert (32768 + VLAN 1 = 32769). Pfadkosten je FastEthernet-Port: ${Sim.STP_COST}.</p>
+    </fieldset>
+    <div class="row"><label>Anzeige für VLAN</label><select data-f="vlan"></select></div>
+    <div data-dyn="info"></div>
+    <div class="warn" data-dyn="warn"></div>`);
+  const q = s => el.querySelector(s);
+  const en = q('[data-f=enabled]'), prio = q('[data-f=prio]'), vsel = q('[data-f=vlan]');
+  let vlan = 1, sig = '';
+  en.addEventListener('change', () => { dev.stp.enabled = en.checked; commit(); });
+  prio.addEventListener('change', () => { dev.stp.priority = Number(prio.value); commit(); });
+  vsel.addEventListener('change', () => { vlan = Number(vsel.value); update(); });
+
+  function update() {
+    en.checked = dev.stp.enabled;
+    prio.value = String(dev.stp.priority);
+    prio.disabled = !dev.stp.enabled;
+    if (vlanSig(dev) !== sig) {
+      sig = vlanSig(dev);
+      vsel.innerHTML = dev.vlans.map(v => `<option value="${v.id}">${v.id} – ${esc(v.name)}</option>`).join('');
+    }
+    if (!dev.vlans.some(v => v.id === vlan)) vlan = 1;
+    vsel.value = String(vlan);
+
+    const data = Sim.stpData();
+    q('[data-dyn=warn]').innerHTML = data.loops.has(vlan)
+      ? warnHtml([`Schleife in VLAN ${vlan} ohne Spanning Tree – Broadcast-Sturm! Frames kreisen endlos, Pings scheitern.`]) : '';
+
+    const info = q('[data-dyn=info]');
+    if (!dev.stp.enabled) {
+      info.innerHTML = '<p class="meta">Spanning Tree ist auf diesem Switch deaktiviert. Er leitet alle Frames weiter ' +
+        'und reicht BPDUs anderer Switches unverändert durch.</p>';
+      return;
+    }
+    const vd = data.vlans[vlan];
+    const b = vd && vd.bridges[dev.id];
+    if (!b) { info.innerHTML = ''; return; }
+    const root = Model.get(b.rootId);
+    const rows = [...vd.ports.values()].filter(p => p.sw === dev && p.active).map(p => {
+      const cls = p.state === 'forwarding' ? 'fwd' : 'blk';
+      return `<tr><td><b>${esc(dev.ports[p.port].name)}</b></td><td>${STP_ROLES[p.role]}</td>` +
+        `<td><span class="stp-state ${cls}">${p.state === 'forwarding' ? 'Forwarding' : 'Blocking'}</span></td>` +
+        `<td>${p.cost}</td><td>${Sim.STP_PORT_PRIO}.${p.port + 1}</td><td>${esc(peerText(dev, p.port))}</td></tr>`;
+    });
+    info.innerHTML = `
+      <fieldset class="box"><legend>VLAN ${vlan}</legend>
+        <table class="kv">
+          <tr><th>Root-Bridge</th><td>${bidText(b.rootBid)} (${esc(root ? root.name : '?')})
+            ${b.isRoot ? '<span class="stp-root">★ Diese Bridge ist Root</span>' : ''}</td></tr>
+          <tr><th>Root-Pfadkosten</th><td>${b.rootCost}</td></tr>
+          <tr><th>Root-Port</th><td>${b.rootPort === null ? '–' : esc(dev.ports[b.rootPort].name)}</td></tr>
+          <tr><th>Diese Bridge</th><td>${bidText(b.bid)}</td></tr>
+        </table>
+        <table class="tbl">
+          <thead><tr><th>Port</th><th>Rolle</th><th>Status</th><th>Kosten</th><th>Port-ID</th><th>Verbunden mit</th></tr></thead>
+          <tbody>${rows.join('') || '<tr><td colspan="6" class="empty">Keine verbundenen Ports in diesem VLAN.</td></tr>'}</tbody>
+        </table>
+      </fieldset>
+      <p class="meta">Angezeigt wird der konvergierte Zustand, er wird nach jeder Änderung sofort neu berechnet.</p>`;
+  }
+
+  return { el, update };
+}
+
 /* ================= Router ================= */
 
 function routerIfacePane(dev) {
@@ -541,6 +619,6 @@ function routingPane(dev) {
 const PANELS = {
   pc: [['config', 'Konfiguration', hostConfigPane], ['terminal', 'Terminal', terminalPane]],
   server: [['config', 'Konfiguration', hostConfigPane], ['services', 'Dienste (DHCP)', dhcpServicePane], ['terminal', 'Terminal', terminalPane]],
-  switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane]],
+  switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['stp', 'Spanning Tree', stpPane]],
   router: [['ifaces', 'Schnittstellen', routerIfacePane], ['routing', 'Routing', routingPane], ['terminal', 'CLI', terminalPane]],
 };

@@ -60,6 +60,16 @@ const App = {
       this.redoStack = [];
     }
     this.snap = s;
+    const loops = [...Sim.stpData().loops].join(', ');
+    if (loops !== (this.loopKey || '')) {
+      if (loops) {
+        this.toast(`Schleife ohne Spanning Tree in VLAN ${loops} – Broadcast-Sturm!`, 'warn');
+        this.status(`⚠ Schleife ohne Spanning Tree in VLAN ${loops}: Frames kreisen endlos, die Kommunikation bricht zusammen.`);
+      } else if (this.loopKey) {
+        this.status('Schleife aufgelöst – Spanning Tree blockiert redundante Wege.');
+      }
+      this.loopKey = loops;
+    }
     try {
       localStorage.setItem('netsim.autosave', s);
       localStorage.setItem('netsim.filename', this.fileName);
