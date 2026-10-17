@@ -208,11 +208,13 @@ const Canvas = {
   portMarkup(d, i, p) {
     const peer = Sim.peer(d, i);
     const up = Sim.portUp(d, i);
-    const blocked = peer ? Sim.stpBlockedVlans(d, i) : [];
-    const fill = !up ? '#ef4444' : !peer ? '#f4f6f8' : blocked.length ? '#f59e0b' : '#22c55e';
+    const blocked = peer ? Sim.stpVlansIn(d, i, 'blocking') : [];
+    const listening = peer ? Sim.stpVlansIn(d, i, 'listening') : [];
+    const fill = !up || listening.length ? '#ef4444' : !peer ? '#f4f6f8' : blocked.length ? '#f59e0b' : '#22c55e';
     let title = `${longPortName(d.ports[i].name)} – ` +
       (peer ? `verbunden mit ${peer.dev.name} (${peer.dev.ports[peer.port].name})` : 'frei, zum Verbinden ziehen');
     if (!up) title += ' – deaktiviert';
+    if (listening.length) title += ` – Spanning Tree: Listening/Learning, noch keine Weiterleitung (VLAN ${listening.join(', ')})`;
     if (blocked.length) title += ` – Spanning Tree: blockiert (VLAN ${blocked.join(', ')})`;
     return `<g class="port${peer ? ' used' : ''}" data-port="${i}" transform="translate(${p.x},${p.y})">` +
       `<circle class="no-export" r="9" fill="transparent"/>` +
@@ -282,7 +284,8 @@ const Canvas = {
       for (const e of ends) {
         if (free > 26) {
           const k = e.ex + 8;
-          const color = !ok ? '#ef4444' : Sim.stpBlockedVlans(e.dev, e.port).length ? '#f59e0b' : '#22c55e';
+          const color = !ok || Sim.stpVlansIn(e.dev, e.port, 'listening').length ? '#ef4444'
+            : Sim.stpVlansIn(e.dev, e.port, 'blocking').length ? '#f59e0b' : '#22c55e';
           s += `<circle cx="${(e.p.x + e.ux * k).toFixed(1)}" cy="${(e.p.y + e.uy * k).toFixed(1)}" r="3.6" fill="${color}" stroke="#ffffff" stroke-width="1"/>`;
         }
         if (this.settings.portLabels && free > 90) {

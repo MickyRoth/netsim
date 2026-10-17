@@ -140,7 +140,7 @@ const Model = {
 
   /** Nach jeder Änderung aufrufen: aktualisiert DHCP und benachrichtigt die Oberfläche. */
   changed(kind) {
-    Sim.invalidate();
+    Sim.invalidate(kind);
     Sim.autoDhcp();
     for (const fn of this.listeners) fn(kind);
   },

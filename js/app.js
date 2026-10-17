@@ -241,7 +241,7 @@ const App = {
     if (Model.devices.length && !confirm('Das aktuelle Netzwerk verwerfen und ein neues beginnen?\n(Rückgängig ist mit Strg+Z möglich.)')) return;
     for (const id of [...Win.wins.keys()]) Win.close(id);
     Win.terms.clear();
-    Model.load({ format: 'netsim', devices: [], links: [] }, 'edit');
+    Model.load({ format: 'netsim', devices: [], links: [] }, 'load');
     this.fileHandle = null;
     this.setFileName('Unbenannt');
     Canvas.view = { x: 60, y: 40, z: 1 };
@@ -299,7 +299,7 @@ const App = {
       const data = JSON.parse(text);
       for (const id of [...Win.wins.keys()]) Win.close(id);
       Win.terms.clear();
-      Model.load(data, 'edit');
+      Model.load(data, 'load');
       this.fileHandle = handle || null;
       this.setFileName(name);
       Canvas.select(null);
@@ -403,7 +403,7 @@ const App = {
     };
     for (const id of [...Win.wins.keys()]) Win.close(id);
     Win.terms.clear();
-    Model.load(data, 'edit');
+    Model.load(data, 'load');
     this.fileHandle = null;
     this.setFileName('Beispiel');
     Canvas.select(null);

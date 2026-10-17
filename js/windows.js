@@ -480,9 +480,9 @@ function stpPane(dev) {
     if (!b) { info.innerHTML = ''; return; }
     const root = Model.get(b.rootId);
     const rows = [...vd.ports.values()].filter(p => p.sw === dev && p.active).map(p => {
-      const cls = p.state === 'forwarding' ? 'fwd' : 'blk';
+      const [cls, label] = { forwarding: ['fwd', 'Forwarding'], blocking: ['blk', 'Blocking'], listening: ['lis', 'Listening/Learning'] }[p.state];
       return `<tr><td><b>${esc(dev.ports[p.port].name)}</b></td><td>${STP_ROLES[p.role]}</td>` +
-        `<td><span class="stp-state ${cls}">${p.state === 'forwarding' ? 'Forwarding' : 'Blocking'}</span></td>` +
+        `<td><span class="stp-state ${cls}">${label}</span></td>` +
         `<td>${p.cost}</td><td>${Sim.STP_PORT_PRIO}.${p.port + 1}</td><td>${esc(peerText(dev, p.port))}</td></tr>`;
     });
     info.innerHTML = `
@@ -499,7 +499,8 @@ function stpPane(dev) {
           <tbody>${rows.join('') || '<tr><td colspan="6" class="empty">Keine verbundenen Ports in diesem VLAN.</td></tr>'}</tbody>
         </table>
       </fieldset>
-      <p class="meta">Angezeigt wird der konvergierte Zustand, er wird nach jeder Änderung sofort neu berechnet.</p>`;
+      <p class="meta">Nach einer Änderung durchlaufen Ports, die neu weiterleiten sollen, ${Sim.STP_DELAY / 1000} s lang
+        Listening/Learning (rot) und leiten in dieser Zeit nichts weiter. Ports, die blockieren müssen, blockieren sofort.</p>`;
   }
 
   return { el, update };

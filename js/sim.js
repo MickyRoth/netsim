@@ -131,9 +131,18 @@ const Sim = {
 
   STP_COST: 19,          // Pfadkosten FastEthernet (100 Mbit/s, Kurzverfahren)
   STP_PORT_PRIO: 128,
+  STP_DELAY: 5000,       // Listening + Learning (bei Cisco 2 × 15 s, hier verkürzt)
   _stp: null,
+  _pending: new Map(),   // "vlan|switch:port" → Zeitpunkt, ab dem weitergeleitet wird
+  _prevFwd: new Set(),
+  _settle: true,         // nach Laden/Rückgängig: sofort konvergiert, ohne Wartezeit
+  _timer: null,
+  _prevPending: 0,
 
-  invalidate() { this._stp = null; },
+  invalidate(kind) {
+    this._stp = null;
+    if (kind === 'init' || kind === 'load' || kind === 'undo') this._settle = true;
+  },
 
   stpOn(d) { return d.type === 'switch' && !!d.stp && d.stp.enabled; },
 
@@ -141,9 +150,54 @@ const Sim = {
   stpData() {
     if (!this._stp) {
       this._stp = this.computeStp();
+      this.applyStpDelay(this._stp);
       this._stp.loops = this.computeLoops();
     }
     return this._stp;
+  },
+
+  /**
+   * Ports, die neu in den Forwarding-Zustand wechseln würden, durchlaufen zuerst
+   * Listening/Learning (STP_DELAY) und leiten in dieser Zeit nichts weiter.
+   */
+  applyStpDelay(res) {
+    const now = performance.now();
+    const fwd = new Set();
+    let added = false;
+    if (this._settle) this._pending.clear();
+    for (const [v, vd] of Object.entries(res.vlans)) {
+      for (const p of vd.ports.values()) {
+        if (p.state !== 'forwarding') continue;
+        const key = v + '|' + p.sw.id + ':' + p.port;
+        fwd.add(key);
+        if (!this._settle && !this._prevFwd.has(key) && !this._pending.has(key)) {
+          this._pending.set(key, now + this.STP_DELAY);
+          added = true;
+        }
+      }
+    }
+    for (const [key, until] of this._pending) {
+      if (!fwd.has(key) || until <= now) this._pending.delete(key);
+    }
+    for (const [v, vd] of Object.entries(res.vlans)) {
+      for (const p of vd.ports.values()) {
+        const key = v + '|' + p.sw.id + ':' + p.port;
+        if (this._pending.has(key)) { p.state = 'listening'; p.until = this._pending.get(key); }
+      }
+    }
+    const wasConverging = this._prevPending > 0;
+    this._prevFwd = fwd;
+    this._settle = false;
+    this._prevPending = this._pending.size;
+
+    clearTimeout(this._timer);
+    if (this._pending.size) {
+      const next = Math.min(...this._pending.values());
+      this._timer = setTimeout(() => Model.changed('stp'), Math.max(30, next - now + 10));
+      if (added) App.status(`Spanning Tree: Ports in Listening/Learning (rot) – Weiterleitung in ${this.STP_DELAY / 1000} s.`);
+    } else if (wasConverging) {
+      App.status('Spanning Tree konvergiert – alle Ports im endgültigen Zustand.');
+    }
   },
 
   bridgeId(sw, v) { return { prio: sw.stp.priority + v, mac: this.mac(sw) }; },
@@ -155,16 +209,17 @@ const Sim = {
     return vd ? vd.ports.get(sw.id + ':' + i) || null : null;
   },
 
+  /** Leitet Switchport i in VLAN v nicht weiter (Blocking oder noch Listening/Learning)? */
   stpBlocked(sw, i, v) {
     if (!this.stpOn(sw)) return false;
     const p = this.stpPort(sw, i, v);
-    return !!p && p.state === 'blocking';
+    return !!p && (p.state === 'blocking' || p.state === 'listening');
   },
 
-  /** VLANs, in denen Switchport i blockiert. */
-  stpBlockedVlans(sw, i) {
+  /** VLANs, in denen Switchport i den Zustand state hat. */
+  stpVlansIn(sw, i, state) {
     if (!this.stpOn(sw)) return [];
-    return sw.vlans.map(v => v.id).filter(v => this.stpBlocked(sw, i, v));
+    return sw.vlans.map(v => v.id).filter(v => { const p = this.stpPort(sw, i, v); return p && p.state === state; });
   },
 
   /**
