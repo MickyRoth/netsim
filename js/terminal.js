@@ -260,6 +260,7 @@ class Terminal {
         '  show ip route                 Routingtabelle',
         '  show ip interface brief       Schnittstellenübersicht',
         '  show running-config           aktuelle Konfiguration',
+        '  show ip protocols             Routing-Protokolle (RIP)',
         '  clear                         Bildschirm löschen',
         '',
       ].join('\n'));
@@ -271,6 +272,8 @@ class Terminal {
       this.showIpRoute();
     } else if (is(a[0], 'show', 2) && is(a[1], 'ip', 2) && is(a[2], 'interface', 3) && is(a[3], 'brief', 1)) {
       this.showIpIntBrief();
+    } else if (is(a[0], 'show', 2) && is(a[1], 'ip', 2) && is(a[2], 'protocols', 4)) {
+      this.showIpProtocols();
     } else if (is(a[0], 'show', 2) && (is(a[1], 'running-config', 3) || is(a[1], 'run', 3))) {
       this.showRun();
     } else if (is(a[0], 'clear', 3) || a[0].toLowerCase() === 'cls') {
@@ -342,12 +345,45 @@ class Terminal {
       if (len === 0 && gw === null) gw = s.nextHop;
       entries.push({ net, len, text: `${len === 0 ? 'S*' : 'S '}   ${IP.cidr(net, mask)} [1/0] via ${s.nextHop}` });
     }
+    for (const e of Sim.ripRoutes(r)) {
+      const len = IP.prefixLen(e.mask);
+      if (len === 0 && gw === null) gw = IP.str(e.nextHop);
+      entries.push({ net: e.net, len, text: `${len === 0 ? 'R*' : 'R '}   ${IP.cidr(e.net, e.mask)} [120/${e.metric}] via ${IP.str(e.nextHop)}, 00:00:0${Math.floor(Math.random() * 5)}, ${longPortName(r.ports[e.port].name)}` });
+    }
     entries.sort((x, y) => (x.net - y.net) || (x.len - y.len));
     this.println('Codes: L - local, C - connected, S - static, R - RIP, O - OSPF');
     this.println('       * - candidate default\n');
     this.println(gw ? `Gateway of last resort is ${gw} to network 0.0.0.0\n` : 'Gateway of last resort is not set\n');
     for (const e of entries) this.println(e.text);
     this.println('');
+  }
+
+  showIpProtocols() {
+    const r = this.dev;
+    if (!r.rip.enabled) { this.println(''); return; }
+    const sec = Sim.RIP_INTERVAL / 1000;
+    const L = [
+      'Routing Protocol is "rip"',
+      `Sending updates every ${sec} seconds (NetSim; Cisco: 30 seconds)`,
+      'Outgoing update filter list for all interfaces is not set',
+      'Incoming update filter list for all interfaces is not set',
+      'Redistributing: rip',
+      'Default version control: send version 2, receive 2',
+      '  Interface             Send  Recv  Triggered RIP  Key-chain',
+    ];
+    for (const i of Sim.ripIfaces(r)) {
+      if (!r.rip.passive.includes(i)) L.push(`  ${longPortName(r.ports[i].name).padEnd(22)}2     2`);
+    }
+    L.push('Automatic network summarization is not in effect', 'Maximum path: 1', 'Routing for Networks:');
+    for (const n of r.rip.networks) L.push(`    ${n}`);
+    if (r.rip.passive.length) {
+      L.push('Passive Interface(s):');
+      for (const i of r.rip.passive) L.push(`    ${longPortName(r.ports[i].name)}`);
+    }
+    L.push('Routing Information Sources:', '    Gateway         Distance      Last Update');
+    for (const e of Sim.ripData().edges.filter(e => e.to === r)) L.push(`    ${IP.str(e.nh).padEnd(16)}120           00:00:0${Math.floor(Math.random() * 5)}`);
+    L.push('Distance: (default is 120)', '');
+    this.println(L.join('\n'));
   }
 
   showIpIntBrief() {
@@ -375,6 +411,13 @@ class Terminal {
     }
     for (const s of r.routes) L.push(`ip route ${s.network} ${s.mask} ${s.nextHop}`);
     if (r.routes.length) L.push('!');
+    if (r.rip.enabled) {
+      L.push('router rip', ' version 2');
+      for (const i of r.rip.passive) L.push(` passive-interface ${longPortName(r.ports[i].name)}`);
+      for (const n of r.rip.networks) L.push(` network ${n}`);
+      if (r.rip.defaultOriginate) L.push(' default-information originate');
+      L.push(' no auto-summary', '!');
+    }
     L.push('end', '');
     this.println(L.join('\n'));
   }

@@ -74,6 +74,7 @@ const Model = {
         return {
           ports: t.ports.map(p => ({ name: p.name, ip: '', mask: '', up: true })),
           routes: [],
+          rip: { enabled: false, networks: [], passive: [], defaultOriginate: false },
         };
     }
     throw new Error('Unbekannter Gerätetyp: ' + type);
@@ -142,6 +143,7 @@ const Model = {
   changed(kind) {
     Sim.invalidate(kind);
     Sim.autoDhcp();
+    Sim.ripData(); // RIP-Updates ggf. anstoßen
     for (const fn of this.listeners) fn(kind);
   },
 
@@ -191,6 +193,18 @@ const Model = {
         d.stp = {
           enabled: s.enabled !== false,
           priority: Number.isInteger(prio) && prio >= 0 && prio <= 61440 && prio % 4096 === 0 ? prio : 32768,
+        };
+      }
+      if (def.rip) {
+        const s = raw.rip || {};
+        const nets = (Array.isArray(s.networks) ? s.networks : [])
+          .map(n => { const ip = IP.parse(String(n)); const c = ip === null ? null : IP.classfulNet(ip); return c === null ? null : IP.str(c); })
+          .filter(Boolean);
+        d.rip = {
+          enabled: !!s.enabled,
+          networks: [...new Set(nets)],
+          passive: (Array.isArray(s.passive) ? s.passive : []).filter(i => Number.isInteger(i) && i >= 0 && i < d.ports.length),
+          defaultOriginate: !!s.defaultOriginate,
         };
       }
       if (def.routes) {

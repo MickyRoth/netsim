@@ -16,7 +16,7 @@ Webbasierte Netzwerksimulation nach dem Vorbild von Cisco Packet Tracer – rein
 | PC, Server | IP / Subnetzmaske / Gateway oder DHCP, Terminal (`ping`, `tracert`, `ipconfig`) |
 | Server | zusätzlich DHCP-Server (Pool, Gateway, Anzahl) |
 | Switch (8 Port) | VLANs anlegen/löschen, Ports als Access (mit VLAN) oder Trunk, Spanning Tree (PVST+, abschaltbar, Bridge-Priorität, Anzeige von Root-Bridge und Port-Rollen) |
-| Router (3 Port) | IP/Maske je Port, Port aktiv/deaktiviert, statische Routen, CLI (`ping`, `traceroute`, `show ip route`, `show ip interface brief`, `show running-config`) |
+| Router (3 Port) | IP/Maske je Port, Port aktiv/deaktiviert, statische Routen, RIPv2 (klassenbasierte network-Einträge, passive Interfaces, Standardroute weitergeben, 5 s je Hop), CLI (`ping`, `traceroute`, `show ip route`, `show ip protocols`, `show ip interface brief`, `show running-config`) |
 
 Außerdem: Text-Werkzeug für Beschriftungen (Farbe, Schriftgröße, Normal/Fett/Kursiv – Doppelklick zum Bearbeiten), Drag & Drop, Verkabeln per Maus, Zoom/Verschieben, Rückgängig/Wiederholen, Speichern/Öffnen (`.netsim`, JSON), Grafik in die Zwischenablage kopieren, PNG-/SVG-Export, automatisches Zwischenspeichern im Browser.
 
@@ -28,6 +28,7 @@ Außerdem: Text-Werkzeug für Beschriftungen (Farbe, Schriftgröße, Normal/Fett
 | `js/model.js` | Gerätetypen (`DEVICE_TYPES`), Datenmodell, Laden/Speichern |
 | `js/icons.js` | Gerätesymbole (SVG) und Symbole der Werkzeugleiste |
 | `js/sim.js` | Simulation: Schicht 2 mit VLANs und Spanning Tree, Routing, ARP, DHCP, Ping |
+| `js/rip.js` | RIPv2: Nachbarn, Update-Runden, gelernte Routen |
 | `js/canvas.js` | Arbeitsfläche: Darstellung, Maus, Zoom, Export, Paketanimation |
 | `js/notes.js` | Text-Werkzeug: Formatierungs-Editor für Beschriftungen |
 | `js/terminal.js` | PC-Eingabeaufforderung und Router-CLI |

@@ -66,6 +66,12 @@ const IP = {
   },
 
   cidr(net, mask) { return IP.str(net) + '/' + IP.prefixLen(mask); },
+
+  /** Klassenbasiertes Netz zu einer Adresse (z. B. 10.1.2.3 → 10.0.0.0), null bei Klasse D/E. */
+  classfulNet(ip) {
+    const m = IP.classfulMask(ip);
+    return m === null ? null : IP.network(ip, m);
+  },
 };
 
 function esc(s) {

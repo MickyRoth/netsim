@@ -141,7 +141,8 @@ const Sim = {
 
   invalidate(kind) {
     this._stp = null;
-    if (kind === 'init' || kind === 'load' || kind === 'undo') this._settle = true;
+    this._rip = null;
+    if (kind === 'init' || kind === 'load' || kind === 'undo') { this._settle = true; this._ripSettle = true; }
   },
 
   stpOn(d) { return d.type === 'switch' && !!d.stp && d.stp.enabled; },
@@ -366,7 +367,7 @@ const Sim = {
 
   /* ---------------- Routing ---------------- */
 
-  /** Routen eines Routers: direkt verbundene (C) und statische (S). */
+  /** Routen eines Routers: direkt verbundene (C), statische (S) und per RIP gelernte (R). */
   routes(r) {
     const list = [];
     r.ports.forEach((p, i) => {
@@ -380,27 +381,34 @@ const Sim = {
       if (net === null || mask === null || nh === null) continue;
       list.push({ code: 'S', net: IP.network(net, mask), mask, nextHop: nh });
     }
+    for (const e of this.ripRoutes(r)) {
+      list.push({ code: 'R', net: e.net, mask: e.mask, nextHop: e.nextHop, metric: e.metric });
+    }
     return list;
   },
+
+  /** Administrative Distanz: bei gleichem Präfix gewinnt die kleinere. */
+  AD: { C: 0, S: 1, R: 120 },
 
   /** Longest-Prefix-Match. Liefert { port, nextHop, code } oder null. */
   lookup(r, dst, depth = 0) {
     if (depth > 4) return null;
-    let best = null, bestLen = -1;
+    let best = null, bestLen = -1, bestAd = Infinity;
     for (const e of this.routes(r)) {
       if (IP.network(dst, e.mask) !== e.net) continue;
       const len = IP.prefixLen(e.mask);
-      if (len < bestLen || (len === bestLen && !(e.code === 'C' && best.code === 'S'))) continue;
+      if (len < bestLen || (len === bestLen && this.AD[e.code] >= bestAd)) continue;
       let cand;
       if (e.code === 'C') {
         cand = { port: e.port, nextHop: dst, code: 'C' };
       } else {
         const via = this.lookup(r, e.nextHop, depth + 1); // rekursive Auflösung des Next Hops
         if (!via) continue;
-        cand = { port: via.port, nextHop: via.code === 'C' ? e.nextHop : via.nextHop, code: 'S' };
+        cand = { port: via.port, nextHop: via.code === 'C' ? e.nextHop : via.nextHop, code: e.code };
       }
       best = cand;
       bestLen = len;
+      bestAd = this.AD[e.code];
     }
     return best;
   },

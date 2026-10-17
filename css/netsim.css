@@ -232,6 +232,7 @@ fieldset.box legend { font-weight: 600; padding: 0 5px; color: #2c3a4a; }
 .badge { display: inline-block; min-width: 18px; text-align: center; font-weight: 700; font-size: 11px; border-radius: 4px; padding: 0 4px; color: #fff; background: #64748b; }
 .badge.C { background: #16a34a; }
 .badge.S { background: #2563eb; }
+.badge.R { background: #7c3aed; }
 
 .kv { border-collapse: collapse; }
 .kv th { text-align: left; font-weight: 600; color: #45505c; padding: 2px 14px 2px 0; white-space: nowrap; vertical-align: top; }

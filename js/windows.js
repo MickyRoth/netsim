@@ -607,11 +607,131 @@ function routingPane(dev) {
       const rt = Sim.routes(dev).map(e => {
         let via;
         if (e.code === 'C') via = `direkt verbunden, ${dev.ports[e.port].name}`;
-        else via = `via ${IP.str(e.nextHop)}` + (Sim.lookup(dev, e.nextHop) ? '' : ' (inaktiv)');
+        else {
+          const r = Sim.lookup(dev, e.nextHop);
+          via = (e.code === 'R' ? `[120/${e.metric}] ` : '[1/0] ') + `via ${IP.str(e.nextHop)}` +
+            (r ? `, ${dev.ports[r.port].name}` : ' (inaktiv)');
+        }
         return { e, html: `<tr><td style="width:30px"><span class="badge ${e.code}">${e.code}</span></td><td>${IP.cidr(e.net, e.mask)}</td><td>${esc(via)}</td></tr>` };
       }).sort((a, b) => (a.e.net - b.e.net) || (IP.prefixLen(a.e.mask) - IP.prefixLen(b.e.mask)));
       q('[data-dyn=rt]').innerHTML = rt.length ? rt.map(x => x.html).join('')
         : '<tr><td class="empty">Leer – Schnittstellen konfigurieren und verkabeln.</td></tr>';
+    },
+  };
+}
+
+function ripPane(dev) {
+  const el = makePane(`
+    <fieldset class="box">
+      <legend>RIP Version 2</legend>
+      <div class="row"><label>RIPv2</label><label class="chk"><input type="checkbox" data-f="enabled"> aktiviert</label></div>
+      <div class="row"><label>Status</label><span data-dyn="state"></span></div>
+    </fieldset>
+    <fieldset class="box">
+      <legend>Netze (network)</legend>
+      <table class="tbl">
+        <thead><tr><th>Netz (klassenbasiert)</th><th>Erfasste Schnittstellen</th><th style="width:36px"></th></tr></thead>
+        <tbody data-dyn="nets"></tbody>
+      </table>
+      <div class="add-row">
+        <input type="text" data-new="net" placeholder="z. B. 192.168.1.0" spellcheck="false">
+        <button class="btn" data-act="add">Netz hinzufügen</button>
+      </div>
+      <div class="err" data-dyn="err"></div>
+      <div class="note" data-dyn="note"></div>
+      <p class="meta">Wie bei Cisco klassenbasiert: 10.1.2.0 → 10.0.0.0 (Klasse A), 172.16.5.0 → 172.16.0.0 (Klasse B),
+        192.168.1.0 bleibt (Klasse C). Alle Schnittstellen in diesem Netz senden und empfangen RIP-Updates und
+        ihr Subnetz wird bekannt gegeben. Automatische Zusammenfassung ist aus (no auto-summary).</p>
+    </fieldset>
+    <fieldset class="box">
+      <legend>Optionen</legend>
+      <div class="row"><label>Passive Interfaces</label><div class="inline">${dev.ports.map((p, i) =>
+        `<label class="chk"><input type="checkbox" data-passive="${i}"> ${esc(p.name)}</label>`).join('')}</div></div>
+      <div class="row"><label>Standardroute</label><label class="chk"><input type="checkbox" data-f="orig"> an Nachbarn weitergeben (default-information originate)</label></div>
+      <p class="meta">Passive Interfaces senden keine Updates (z. B. zu einem LAN nur mit PCs), ihr Netz wird aber weiterhin bekannt gegeben.</p>
+    </fieldset>
+    <fieldset class="box">
+      <legend>RIP-Nachbarn</legend>
+      <div data-dyn="nbrs"></div>
+    </fieldset>
+    <fieldset class="box">
+      <legend>Gelernte RIP-Routen</legend>
+      <table class="tbl mono">
+        <thead><tr><th>Zielnetz</th><th>Hops</th><th>Next Hop</th><th>Schnittstelle</th><th>Status</th></tr></thead>
+        <tbody data-dyn="routes"></tbody>
+      </table>
+      <p class="meta">Updates werden alle ${Sim.RIP_INTERVAL / 1000} s ausgetauscht: Netze, die n Hops entfernt sind,
+        erscheinen nach n × ${Sim.RIP_INTERVAL / 1000} s – und verschwinden nach einem Ausfall ebenso Hop für Hop.</p>
+    </fieldset>`);
+  const q = s => el.querySelector(s);
+  const c = dev.rip;
+  const en = q('[data-f=enabled]'), orig = q('[data-f=orig]'), inp = q('[data-new=net]');
+  const err = q('[data-dyn=err]'), note = q('[data-dyn=note]');
+  en.addEventListener('change', () => { c.enabled = en.checked; commit(); });
+  orig.addEventListener('change', () => { c.defaultOriginate = orig.checked; commit(); });
+  el.querySelectorAll('[data-passive]').forEach(cb => cb.addEventListener('change', () => {
+    const i = Number(cb.dataset.passive);
+    c.passive = cb.checked ? [...new Set([...c.passive, i])].sort() : c.passive.filter(x => x !== i);
+    commit();
+  }));
+  const add = () => {
+    err.textContent = '';
+    note.textContent = '';
+    const v = inp.value.trim();
+    if (!v) return;
+    const ip = IP.parse(v);
+    const cn = ip === null ? null : IP.classfulNet(ip);
+    if (cn === null) { err.textContent = 'Bitte eine gültige IPv4-Adresse der Klasse A, B oder C eingeben, z. B. 192.168.1.0.'; return; }
+    const net = IP.str(cn);
+    if (c.networks.includes(net)) { err.textContent = `network ${net} ist bereits eingetragen.`; return; }
+    c.networks.push(net);
+    c.networks.sort((a, b) => IP.parse(a) - IP.parse(b));
+    if (net !== v) note.textContent = `Eingabe ${v} → klassenbasiert ${net} übernommen.`;
+    inp.value = '';
+    commit();
+  };
+  q('[data-act=add]').addEventListener('click', add);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+  q('[data-dyn=nets]').addEventListener('click', e => {
+    const b = e.target.closest('[data-del]');
+    if (!b) return;
+    c.networks = c.networks.filter(n => n !== b.dataset.del);
+    commit();
+  });
+
+  return {
+    el,
+    update() {
+      en.checked = c.enabled;
+      orig.checked = c.defaultOriginate;
+      el.querySelectorAll('[data-passive]').forEach(cb => { cb.checked = c.passive.includes(Number(cb.dataset.passive)); });
+
+      const state = q('[data-dyn=state]');
+      if (!c.enabled) { state.className = 'meta'; state.textContent = 'deaktiviert'; }
+      else if (Sim.ripConverging()) { state.className = 'warn'; state.textContent = `Routing-Updates werden ausgetauscht … (${Sim.RIP_INTERVAL / 1000} s je Hop)`; }
+      else { state.className = 'ok-text'; state.textContent = 'konvergiert'; }
+
+      q('[data-dyn=nets]').innerHTML = c.networks.length ? c.networks.map(n => {
+        const ifs = dev.ports.filter((p, i) => {
+          const ip = IP.parse(p.ip || '');
+          return ip !== null && IP.classfulNet(ip) === IP.parse(n);
+        }).map(p => p.name);
+        return `<tr><td><code>network ${esc(n)}</code></td><td>${ifs.length ? esc(ifs.join(', ')) : '<span class="warn">keine Schnittstelle in diesem Netz</span>'}</td>` +
+          `<td><button class="btn-icon" data-del="${esc(n)}" title="Netz entfernen">✕</button></td></tr>`;
+      }).join('') : '<tr><td colspan="3" class="empty">Noch keine Netze eingetragen.</td></tr>';
+
+      const edges = c.enabled ? Sim.ripData().edges.filter(e => e.to === dev) : [];
+      q('[data-dyn=nbrs]').innerHTML = edges.length
+        ? `<table class="tbl"><thead><tr><th>Nachbar</th><th>Router</th><th>Über Schnittstelle</th></tr></thead><tbody>${edges.map(e =>
+          `<tr><td>${IP.str(e.nh)}</td><td>${esc(e.from.name)}</td><td>${esc(dev.ports[e.toPort].name)}</td></tr>`).join('')}</tbody></table>`
+        : `<span class="meta">${c.enabled ? 'Keine RIP-Nachbarn erreichbar (Nachbar-Router brauchen ebenfalls RIP mit passendem network-Eintrag).' : '–'}</span>`;
+
+      const rows = Sim.ripTable(dev).sort((a, b) => (a.net - b.net) || (IP.prefixLen(a.mask) - IP.prefixLen(b.mask))).map(e => {
+        const inst = !Sim.ripSuperseded(dev, e.net, e.mask);
+        return `<tr><td>${IP.cidr(e.net, e.mask)}</td><td>${e.metric}</td><td>${IP.str(e.nextHop)}</td><td>${esc(dev.ports[e.port].name)}</td>` +
+          `<td>${inst ? '<span class="ok-text">in Routingtabelle</span>' : '<span class="meta">ersetzt (direkt/statisch)</span>'}</td></tr>`;
+      });
+      q('[data-dyn=routes]').innerHTML = rows.join('') || '<tr><td colspan="5" class="empty">Keine gelernten Routen.</td></tr>';
     },
   };
 }
@@ -621,5 +741,5 @@ const PANELS = {
   pc: [['config', 'Konfiguration', hostConfigPane], ['terminal', 'Terminal', terminalPane]],
   server: [['config', 'Konfiguration', hostConfigPane], ['services', 'Dienste (DHCP)', dhcpServicePane], ['terminal', 'Terminal', terminalPane]],
   switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['stp', 'Spanning Tree', stpPane]],
-  router: [['ifaces', 'Schnittstellen', routerIfacePane], ['routing', 'Routing', routingPane], ['terminal', 'CLI', terminalPane]],
+  router: [['ifaces', 'Schnittstellen', routerIfacePane], ['routing', 'Routing', routingPane], ['rip', 'RIP', ripPane], ['terminal', 'CLI', terminalPane]],
 };
