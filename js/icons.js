@@ -32,6 +32,19 @@ ${bays}
 </g>`;
   },
 
+  /** Layer-3-Switch: Switch-Gehäuse mit den vier Router-Pfeilen (wie das Cisco-Multilayer-Symbol). */
+  l3switch() {
+    return `<rect x="0" y="0" width="220" height="44" rx="6" fill="#1d5a96" stroke="#123c66" stroke-width="1.5"/>
+<rect x="2" y="2" width="216" height="12" rx="5" fill="#ffffff" fill-opacity="0.14"/>
+<g transform="translate(25,22) scale(0.52)" fill="#e3ecf7">
+<polygon transform="rotate(45)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
+<polygon transform="rotate(225)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
+<polygon transform="rotate(-45)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
+<polygon transform="rotate(135)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
+</g>
+<text x="212" y="12" text-anchor="end" font-size="9" font-weight="700" fill="#cfe0f3" font-family="Segoe UI, Arial, sans-serif">L3</text>`;
+  },
+
   router() {
     return `<path d="M2 14V42A40 12 0 0 0 82 42V14Z" fill="#2f6fae" stroke="#1b4975" stroke-width="1.5"/>
 <ellipse cx="42" cy="14" rx="40" ry="12" fill="#5b9bd8" stroke="#1b4975" stroke-width="1.5"/>

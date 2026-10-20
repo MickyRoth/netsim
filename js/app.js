@@ -3,11 +3,11 @@
 /* Anwendung: Werkzeugleiste, Palette, Dateien, Export, Rückgängig, Tastatur. */
 
 /** Programmversion – bei jeder Veröffentlichung erhöhen (auch ?v= in index.html). */
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 
 const PALETTE = [
   { group: 'Endgeräte', items: ['pc', 'server'] },
-  { group: 'Netzwerkgeräte', items: ['switch', 'router'] },
+  { group: 'Netzwerkgeräte', items: ['switch', 'l3switch', 'router'] },
   { group: 'Werkzeuge', items: ['text'] },
 ];
 
@@ -118,9 +118,8 @@ const App = {
           continue;
         }
         const t = DEVICE_TYPES[type];
-        const [main, sub] = t.label.split(' (');
         html += `<div class="pal-item" draggable="true" data-type="${type}" title="${esc(t.label)} – auf die Arbeitsfläche ziehen oder anklicken">` +
-          `${Icons.deviceSvg(type)}<span>${esc(main)}</span>${sub ? `<small>${esc(sub.replace(')', ''))}</small>` : ''}</div>`;
+          `${Icons.deviceSvg(type)}<span>${esc(t.label)}</span>${t.sub ? `<small>${esc(t.sub)}</small>` : ''}</div>`;
       }
     }
     html += `<div class="pal-hint">Geräte auf die Arbeitsfläche ziehen.<div class="pal-version">NetSim V${APP_VERSION}</div></div>`;

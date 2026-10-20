@@ -7,19 +7,23 @@
  */
 const DEVICE_TYPES = {
   pc: {
-    label: 'PC', prefix: 'PC', w: 60, h: 56, startTtl: 128,
+    label: 'PC', sub: '', prefix: 'PC', w: 60, h: 56, startTtl: 128,
     ports: [{ name: 'Fa0', x: 30, y: 2 }],
   },
   server: {
-    label: 'Server', prefix: 'Server', w: 52, h: 68, startTtl: 128,
+    label: 'Server', sub: '', prefix: 'Server', w: 52, h: 68, startTtl: 128,
     ports: [{ name: 'Fa0', x: 26, y: 2 }],
   },
   switch: {
-    label: 'Switch (8 Port)', prefix: 'Switch', w: 220, h: 44,
+    label: 'Switch (L2)', sub: '8 Port', prefix: 'Switch', w: 220, h: 44,
+    ports: Array.from({ length: 8 }, (_, i) => ({ name: 'Fa0/' + (i + 1), x: 60 + i * 20, y: 44 })),
+  },
+  l3switch: {
+    label: 'Switch (L3)', sub: '8 Port · Routing', prefix: 'L3-Switch', w: 220, h: 44, startTtl: 255,
     ports: Array.from({ length: 8 }, (_, i) => ({ name: 'Fa0/' + (i + 1), x: 60 + i * 20, y: 44 })),
   },
   router: {
-    label: 'Router (3 Port)', prefix: 'Router', w: 84, h: 56, startTtl: 255,
+    label: 'Router', sub: '3 Port', prefix: 'Router', w: 84, h: 56, startTtl: 255,
     ports: [
       { name: 'Gi0/0', x: 2, y: 30 },
       { name: 'Gi0/1', x: 82, y: 30 },
@@ -70,9 +74,21 @@ const Model = {
           vlans: [{ id: 1, name: 'default' }],
           ports: t.ports.map(p => ({ name: p.name, mode: 'access', vlan: 1 })),
         };
+      case 'l3switch':
+        return {
+          stp: { enabled: true, priority: 32768 },
+          vlans: [{ id: 1, name: 'default' }],
+          ports: t.ports.map(p => ({ name: p.name, mode: 'access', vlan: 1, ip: '', mask: '' })),
+          svis: [],          // VLAN-Schnittstellen: { vlan, ip, mask, up }
+          ipRouting: false,  // wie bei Cisco standardmäßig aus
+          routes: [],
+          rip: { enabled: false, networks: [], passive: [], defaultOriginate: false },
+        };
       case 'router':
         return {
           ports: t.ports.map(p => ({ name: p.name, ip: '', mask: '', up: true })),
+          subifs: [],        // Subinterfaces (802.1Q): { port, vlan, ip, mask }
+          dhcpd: { enabled: false, pools: [] },  // DHCP-Server: Pools wie beim Server
           routes: [],
           rip: { enabled: false, networks: [], passive: [], defaultOriginate: false },
         };
@@ -92,7 +108,7 @@ const Model = {
   removeDevice(id) {
     this.links = this.links.filter(l => l.a.dev !== id && l.b.dev !== id);
     this.devices = this.devices.filter(d => d.id !== id);
-    for (const d of this.devices) if (d.dhcp) delete d.dhcp.leases[id];
+    for (const pool of Sim.allPools()) delete pool.leases[id];
     this.changed('remove');
   },
 
@@ -183,7 +199,7 @@ const Model = {
         if (!d.vlans.some(v => v.id === 1)) d.vlans.unshift({ id: 1, name: 'default' });
         d.vlans.sort((a, b) => a.id - b.id);
         for (const p of d.ports) {
-          if (p.mode !== 'trunk') p.mode = 'access';
+          if (p.mode !== 'trunk' && !(d.type === 'l3switch' && p.mode === 'routed')) p.mode = 'access';
           if (!d.vlans.some(v => v.id === p.vlan)) p.vlan = 1;
         }
       }
@@ -203,9 +219,37 @@ const Model = {
         d.rip = {
           enabled: !!s.enabled,
           networks: [...new Set(nets)],
-          passive: (Array.isArray(s.passive) ? s.passive : []).filter(i => Number.isInteger(i) && i >= 0 && i < d.ports.length),
+          passive: (Array.isArray(s.passive) ? s.passive : [])
+            .filter(i => (Number.isInteger(i) && i >= 0 && i < d.ports.length) || /^(v\d{1,4}|\d\.\d{1,4})$/.test(i)),
           defaultOriginate: !!s.defaultOriginate,
         };
+      }
+      if (def.subifs) {
+        const seen = new Set();
+        d.subifs = (Array.isArray(raw.subifs) ? raw.subifs : [])
+          .filter(s => s && Number.isInteger(s.port) && s.port >= 0 && s.port < d.ports.length &&
+            Number.isInteger(s.vlan) && s.vlan >= 1 && s.vlan <= 4094 && !seen.has(s.port + '.' + s.vlan) && seen.add(s.port + '.' + s.vlan))
+          .map(s => ({ port: s.port, vlan: s.vlan, ip: String(s.ip || ''), mask: String(s.mask || '') }))
+          .sort((a, b) => (a.port - b.port) || (a.vlan - b.vlan));
+      }
+      if (def.dhcpd) {
+        const s = raw.dhcpd || {};
+        d.dhcpd = {
+          enabled: !!s.enabled,
+          pools: (Array.isArray(s.pools) ? s.pools : []).filter(p => p && typeof p === 'object').map(p => ({
+            name: String(p.name || 'LAN'), gateway: String(p.gateway || ''), start: String(p.start || ''),
+            mask: String(p.mask || ''), max: clamp(parseInt(p.max, 10) || 50, 1, 1000),
+            leases: Object.assign({}, p.leases),
+          })),
+        };
+      }
+      if (def.svis) {
+        const seen = new Set();
+        d.svis = (Array.isArray(raw.svis) ? raw.svis : [])
+          .filter(s => s && Number.isInteger(s.vlan) && s.vlan >= 1 && s.vlan <= 4094 && !seen.has(s.vlan) && seen.add(s.vlan))
+          .map(s => ({ vlan: s.vlan, ip: String(s.ip || ''), mask: String(s.mask || ''), up: s.up !== false }))
+          .sort((a, b) => a.vlan - b.vlan);
+        d.ipRouting = !!raw.ipRouting;
       }
       if (def.routes) {
         d.routes = (Array.isArray(raw.routes) ? raw.routes : []).map(r => ({

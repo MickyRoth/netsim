@@ -15,8 +15,9 @@ Webbasierte Netzwerksimulation nach dem Vorbild von Cisco Packet Tracer – rein
 |---|---|
 | PC, Server | IP / Subnetzmaske / Gateway oder DHCP, Terminal (`ping`, `tracert`, `ipconfig`) |
 | Server | zusätzlich DHCP-Server (Pool, Gateway, Anzahl) |
-| Switch (8 Port) | VLANs anlegen/löschen, Ports als Access (mit VLAN) oder Trunk, Spanning Tree (PVST+, abschaltbar, Bridge-Priorität, Anzeige von Root-Bridge und Port-Rollen) |
-| Router (3 Port) | IP/Maske je Port, Port aktiv/deaktiviert, statische Routen, RIPv2 (klassenbasierte network-Einträge, passive Interfaces, Standardroute weitergeben, 5 s je Hop), CLI (`ping`, `traceroute`, `show ip route`, `show ip protocols`, `show ip interface brief`, `show running-config`) |
+| Switch (L2, 8 Port) | VLANs anlegen/löschen, Ports als Access (mit VLAN) oder Trunk, Spanning Tree (PVST+, abschaltbar, Bridge-Priorität, Anzeige von Root-Bridge und Port-Rollen) |
+| Switch (L3, 8 Port) | alles vom L2-Switch, dazu VLAN-Schnittstellen (SVI), geroutete Ports (`no switchport`), `ip routing` (Standard: aus), statische Routen, RIPv2, CLI inkl. `show vlan brief` |
+| Router (3 Port) | IP/Maske je Port, Port aktiv/deaktiviert, Subinterfaces (802.1Q, Router on a Stick), DHCP-Server mit mehreren Pools, statische Routen, RIPv2 (klassenbasierte network-Einträge, passive Interfaces, Standardroute weitergeben, 5 s je Hop), CLI (`ping`, `traceroute`, `show ip route`, `show ip protocols`, `show ip interface brief`, `show ip dhcp binding`, `show running-config`) |
 
 Außerdem: Text-Werkzeug für Beschriftungen (Farbe, Schriftgröße, Normal/Fett/Kursiv – Doppelklick zum Bearbeiten), Drag & Drop, Verkabeln per Maus, Zoom/Verschieben, Rückgängig/Wiederholen, Speichern/Öffnen (`.netsim`, JSON), Grafik in die Zwischenablage kopieren, PNG-/SVG-Export, automatisches Zwischenspeichern im Browser.
 

@@ -116,7 +116,7 @@ const Canvas = {
       const t = DEVICE_TYPES[d.type];
       x0 = Math.min(x0, d.x - 30);
       y0 = Math.min(y0, d.y - 30);
-      x1 = Math.max(x1, d.x + t.w + (d.type === 'switch' ? 80 : 30));
+      x1 = Math.max(x1, d.x + t.w + (Sim.isSwitch(d) ? 80 : 30));
       y1 = Math.max(y1, d.y + t.h + 45);
     }
     for (const n of Model.notes) {
@@ -196,7 +196,7 @@ const Canvas = {
       s += `<rect class="no-export" x="-9" y="-9" width="${t.w + 18}" height="${t.h + 18}" rx="8" fill="#3b82f6" fill-opacity="0.08" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="5 3"/>`;
     }
     s += `<g class="dev-body">${Icons[d.type]()}</g>`;
-    if (d.type === 'switch') {
+    if (Sim.isSwitch(d)) {
       s += t.ports.map((p, i) =>
         `<text x="${p.x}" y="${p.y - 10}" font-size="9" fill="#dbe8f6" text-anchor="middle">${i + 1}</text>`).join('');
     }
@@ -216,6 +216,7 @@ const Canvas = {
     if (!up) title += ' – deaktiviert';
     if (listening.length) title += ` – Spanning Tree: Listening/Learning, noch keine Weiterleitung (VLAN ${listening.join(', ')})`;
     if (blocked.length) title += ` – Spanning Tree: blockiert (VLAN ${blocked.join(', ')})`;
+    if (d.type === 'l3switch' && d.ports[i].mode === 'routed') title += ' – gerouteter Port (no switchport)';
     return `<g class="port${peer ? ' used' : ''}" data-port="${i}" transform="translate(${p.x},${p.y})">` +
       `<circle class="no-export" r="9" fill="transparent"/>` +
       `<rect x="-5" y="-5" width="10" height="10" rx="2" fill="${fill}" stroke="#37474f" stroke-width="1.2"/>` +
@@ -224,7 +225,7 @@ const Canvas = {
 
   labelMarkup(d, t) {
     let x = t.w / 2, y = t.h + 18, anchor = 'middle';
-    if (d.type === 'switch') { x = t.w + 10; y = t.h / 2 + 4; anchor = 'start'; }
+    if (Sim.isSwitch(d)) { x = t.w + 10; y = t.h / 2 + 4; anchor = 'start'; }
     else if (d.type === 'router') { y = -9; }
     let s = `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="12" font-weight="600" fill="#1f2933" ${HALO}>${esc(d.name)}</text>`;
     if (Sim.stpOn(d)) {
@@ -237,7 +238,7 @@ const Canvas = {
       if (rootIn.length) {
         s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="9.5" font-weight="600" fill="#b45309" ${HALO}>★ Root-Bridge</text>`;
       }
-    } else if (d.type === 'switch') {
+    } else if (Sim.isSwitch(d)) {
       s += `<text x="${x}" y="${y - 15}" text-anchor="${anchor}" font-size="10.5" fill="#64748b" ${HALO}>STP aus</text>`;
     }
     if (this.settings.showIP && Sim.isHost(d)) {
@@ -292,11 +293,13 @@ const Canvas = {
           const k = e.ex + 30;
           const lx = (e.p.x + e.ux * k).toFixed(1), ly = (e.p.y + e.uy * k).toFixed(1);
           let txt = `<tspan x="${lx}" dy="0">${esc(e.dev.ports[e.port].name)}</tspan>`;
-          if (this.settings.showIP && e.dev.type === 'router') {
-            const pr = e.dev.ports[e.port];
+          const pr = Sim.isRouterLike(e.dev) ? Sim.ifaceConfig(e.dev, e.port) : null;
+          if (this.settings.showIP && pr) {
             const ip = IP.parse(pr.ip || ''), mk = IP.parseMask(pr.mask || '');
             if (ip !== null) txt += `<tspan x="${lx}" dy="12">${IP.str(ip)}${mk !== null ? '/' + IP.prefixLen(mk) : ''}</tspan>`;
           }
+          const subs = e.dev.subifs ? e.dev.subifs.filter(s => s.port === e.port) : [];
+          if (subs.length) txt += `<tspan x="${lx}" dy="12">Subif: ${subs.map(s => '.' + s.vlan).join(' ')}</tspan>`;
           s += `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="10" fill="#334155" ${HALO}>${txt}</text>`;
         }
       }
@@ -479,7 +482,7 @@ const Canvas = {
       this.select('device', d.id);
       const items = [{ label: 'Konfigurieren …', action: () => Win.open(d) }];
       if (d.type !== 'switch') {
-        items.push({ label: d.type === 'router' ? 'CLI öffnen …' : 'Terminal öffnen …', action: () => Win.open(d, 'terminal') });
+        items.push({ label: Sim.isRouterLike(d) ? 'CLI öffnen …' : 'Terminal öffnen …', action: () => Win.open(d, 'terminal') });
       }
       items.push('-', { label: 'Alle Kabel dieses Geräts lösen', action: () => {
         Model.links = Model.links.filter(l => l.a.dev !== d.id && l.b.dev !== d.id);

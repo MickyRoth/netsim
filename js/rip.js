@@ -18,7 +18,7 @@ Object.assign(Sim, {
   _ripRounds: 0,
   _ripBusy: false,
 
-  ripOn(d) { return d.type === 'router' && !!d.rip && d.rip.enabled; },
+  ripOn(d) { return this.isRouterLike(d) && this.routingOn(d) && !!d.rip && d.rip.enabled; },
 
   /** Wird Router-Schnittstelle i von einem network-Eintrag erfasst? */
   ripCovers(r, i) {
@@ -29,7 +29,7 @@ Object.assign(Sim, {
   },
 
   ripIfaces(r) {
-    return r.ports.map((_, i) => i).filter(i => this.portActive(r, i) && this.ripCovers(r, i));
+    return this.l3Ifaces(r).filter(i => this.portActive(r, i) && this.ripCovers(r, i));
   },
 
   /** Wer empfängt wessen Updates? (gleiches Netzsegment und Subnetz, Absender nicht passiv) */
@@ -55,11 +55,11 @@ Object.assign(Sim, {
 
   /** Hat der Router für dieses Präfix eine bessere Route (direkt verbunden oder statisch)? */
   ripSuperseded(r, net, mask) {
-    const direct = h => r.ports.some((_, i) => {
+    const direct = h => this.l3Ifaces(r).some(i => {
       const f = this.portIp(r, i);
       return f && this.portActive(r, i) && IP.sameNet(h, f.ip, f.mask);
     });
-    for (let i = 0; i < r.ports.length; i++) {
+    for (const i of this.l3Ifaces(r)) {
       const f = this.portIp(r, i);
       if (f && this.portActive(r, i) && f.mask === mask && IP.network(f.ip, f.mask) === net) return true;
     }
@@ -96,10 +96,10 @@ Object.assign(Sim, {
       if (!this.ripOn(S)) continue;
       const t = new Map();
       const conn = new Set();
-      S.ports.forEach((_, i) => {
+      for (const i of this.l3Ifaces(S)) {
         const f = this.portIp(S, i);
         if (f && this.portActive(S, i)) conn.add(IP.network(f.ip, f.mask) + '/' + IP.prefixLen(f.mask));
-      });
+      }
       const old = prev.get(S.id) || new Map();
       const allowed = filter ? (filter.get(S.id) || new Map()) : null;
       for (const e of edges) {

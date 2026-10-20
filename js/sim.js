@@ -25,9 +25,82 @@ const Sim = {
     return { ip, mask, gw };
   },
 
-  portUp(d, i) { return d.type === 'router' ? !!d.ports[i].up : true; },
+  /* ---------------- Geräteklassen und L3-Schnittstellen ----------------
+   * L3-Schnittstellen werden über einen Schlüssel angesprochen:
+   *   Zahl  = physischer Port (Router-Port, gerouteter Switch-Port, Host-Netzwerkkarte)
+   *   'v10' = VLAN-Schnittstelle (SVI) eines L3-Switches
+   *   '0.10' = Subinterface eines Router-Ports (Port 0, 802.1Q-VLAN 10) – "Router on a Stick"
+   */
+
+  isSwitch(d) { return d.type === 'switch' || d.type === 'l3switch'; },
+
+  /** Geräte mit Routing-Funktionen (Routingtabelle, statische Routen, RIP, CLI). */
+  isRouterLike(d) { return d.type === 'router' || d.type === 'l3switch'; },
+
+  /** Leitet das Gerät IP-Pakete weiter? (L3-Switch nur mit "ip routing") */
+  routingOn(d) { return d.type === 'router' || (d.type === 'l3switch' && !!d.ipRouting); },
+
+  isSvi(k) { return typeof k === 'string' && k[0] === 'v'; },
+  isSubif(k) { return typeof k === 'string' && k[0] !== 'v'; },
+  isVirtual(k) { return typeof k === 'string'; },
+
+  sviOf(d, k) {
+    return this.isSvi(k) && d.svis ? d.svis.find(s => 'v' + s.vlan === k) || null : null;
+  },
+
+  subifOf(d, k) {
+    return this.isSubif(k) && d.subifs ? d.subifs.find(s => s.port + '.' + s.vlan === k) || null : null;
+  },
+
+  /** Physischer Port eines Subinterfaces. */
+  subifPort(k) { return Number(k.split('.')[0]); },
+
+  /** Alle L3-Schnittstellen eines Geräts. */
+  l3Ifaces(d) {
+    if (this.isHost(d)) return [0];
+    if (d.type === 'router') return [...d.ports.map((_, i) => i), ...d.subifs.map(s => s.port + '.' + s.vlan)];
+    if (d.type === 'l3switch') {
+      return [...d.ports.map((p, i) => (p.mode === 'routed' ? i : null)).filter(i => i !== null),
+        ...d.svis.map(s => 'v' + s.vlan)];
+    }
+    return [];
+  },
+
+  /** Konfigurationsobjekt (ip, mask, up) einer L3-Schnittstelle von Router/L3-Switch. */
+  ifaceConfig(d, k) {
+    if (this.isSvi(k)) return this.sviOf(d, k);
+    if (this.isSubif(k)) return this.subifOf(d, k);
+    if (d.type === 'router') return d.ports[k] || null;
+    if (d.type === 'l3switch') { const p = d.ports[k]; return p && p.mode === 'routed' ? p : null; }
+    return null;
+  },
+
+  ifaceName(d, k) {
+    if (this.isSvi(k)) return 'Vlan' + k.slice(1);
+    if (this.isSubif(k)) return d.ports[this.subifPort(k)].name + '.' + k.split('.')[1];
+    return d.ports[k].name;
+  },
+  ifaceLong(d, k) {
+    if (this.isSvi(k)) return 'Vlan' + k.slice(1);
+    if (this.isSubif(k)) return longPortName(d.ports[this.subifPort(k)].name) + '.' + k.split('.')[1];
+    return longPortName(d.ports[k].name);
+  },
+
+  portUp(d, i) {
+    if (this.isSvi(i)) { const s = this.sviOf(d, i); return !!s && s.up; }
+    if (this.isSubif(i)) return !!this.subifOf(d, i) && this.portUp(d, this.subifPort(i));
+    return d.type === 'router' ? !!d.ports[i].up : true;
+  },
+
+  /** SVI ist "up/up": VLAN existiert und mindestens ein Port dieses VLANs leitet weiter. */
+  sviLineUp(d, k) {
+    const s = this.sviOf(d, k);
+    if (!s || !s.up || !d.vlans.some(v => v.id === s.vlan)) return false;
+    return d.ports.some((_, i) => this.carries(d, i, s.vlan) && !!this.peer(d, i) && !this.stpBlocked(d, i, s.vlan));
+  },
 
   peer(d, i) {
+    if (this.isVirtual(i)) return null;
     const l = Model.linkAt(d.id, i);
     if (!l) return null;
     const o = Model.peerOf(l, d.id, i);
@@ -37,6 +110,8 @@ const Sim = {
 
   /** Kabel gesteckt und beide Seiten aktiv. */
   portActive(d, i) {
+    if (this.isSvi(i)) return this.sviLineUp(d, i);
+    if (this.isSubif(i)) return !!this.subifOf(d, i) && this.portActive(d, this.subifPort(i));
     const p = this.peer(d, i);
     return !!p && this.portUp(d, i) && this.portUp(p.dev, p.port);
   },
@@ -47,18 +122,15 @@ const Sim = {
       const f = this.hostIface(d);
       return f && i === 0 ? { ip: f.ip, mask: f.mask } : null;
     }
-    if (d.type === 'router') {
-      const p = d.ports[i];
-      if (!p || !p.up) return null;
-      const ip = IP.parse(p.ip || ''), mask = IP.parseMask(p.mask || '');
-      return ip !== null && mask !== null ? { ip, mask } : null;
-    }
-    return null;
+    const c = this.isRouterLike(d) ? this.ifaceConfig(d, i) : null;
+    if (!c || !this.portUp(d, i)) return null;
+    const ip = IP.parse(c.ip || ''), mask = IP.parseMask(c.mask || '');
+    return ip !== null && mask !== null ? { ip, mask } : null;
   },
 
   /** Ist ip eine (aktive) Adresse dieses Geräts? */
   owns(d, ip) {
-    return d.ports.some((_, i) => {
+    return this.l3Ifaces(d).some(i => {
       const f = this.portIp(d, i);
       return f && f.ip === ip && (this.isHost(d) || this.portActive(d, i));
     });
@@ -78,22 +150,54 @@ const Sim = {
       const p = this.peer(fromDev, fromPort);
       if (!p || !this.portUp(p.dev, p.port)) return;
       const nh = hops.concat([{ link: p.link.id, from: fromDev.id, to: p.dev.id }]);
-      if (p.dev.type === 'switch') {
+      if (this.isSwitch(p.dev) && p.dev.ports[p.port].mode !== 'routed') {
         const vlan = this.ingressVlan(p.dev, p.port, tag);
         if (vlan === null || this.stpBlocked(p.dev, p.port, vlan)) return;
         const key = p.dev.id + ':' + vlan;
         // Derselbe Switch wird über einen zweiten Weg erreicht: Schleife → Broadcast-Sturm
         if (visited.has(key)) { result.loop = true; return; }
         visited.add(key);
-        queue.push({ sw: p.dev, vlan, inPort: p.port, hops: nh });
+        enterVlan(p.dev, vlan, p.port, nh);
+      } else if (p.dev.type === 'router') {
+        // Router-Port: ungetaggt → physischer Port (natives VLAN 1, ggf. Subinterface .1),
+        // getaggt → Subinterface mit passender 802.1Q-VLAN-ID, sonst verworfen
+        const keys = [];
+        if (tag == null) {
+          keys.push(p.port);
+          if (this.subifOf(p.dev, p.port + '.1')) keys.push(p.port + '.1');
+        } else if (this.subifOf(p.dev, p.port + '.' + tag)) {
+          keys.push(p.port + '.' + tag);
+        }
+        for (const k of keys) if (!(p.dev.id === dev.id && k === portIdx)) result.push({ dev: p.dev, port: k, hops: nh });
       } else {
-        if (tag != null) return; // Endgeräte/Router verstehen keine VLAN-Tags
+        if (tag != null) return; // Endgeräte verstehen keine VLAN-Tags
         if (p.dev.id === dev.id && p.port === portIdx) return;
         result.push({ dev: p.dev, port: p.port, hops: nh });
       }
     };
 
-    cross(dev, portIdx, null, []);
+    // Frame ist im VLAN eines Switches angekommen; eine SVI dieses VLANs ist ebenfalls Empfänger
+    const enterVlan = (sw, vlan, inPort, hops) => {
+      queue.push({ sw, vlan, inPort, hops });
+      const k = 'v' + vlan;
+      if (sw.type === 'l3switch' && !(sw === dev && k === portIdx) && this.portIp(sw, k)) {
+        result.push({ dev: sw, port: k, hops });
+      }
+    };
+
+    if (this.isSvi(portIdx)) {
+      // Senden aus einer SVI: der Frame entsteht direkt im VLAN des eigenen Switches
+      const v = Number(portIdx.slice(1));
+      if (!this.sviLineUp(dev, portIdx)) return result;
+      visited.add(dev.id + ':' + v);
+      queue.push({ sw: dev, vlan: v, inPort: null, hops: [] });
+    } else if (this.isSubif(portIdx)) {
+      // Senden aus einem Subinterface: getaggter Frame (VLAN 1 = natives VLAN, ungetaggt)
+      const vlan = Number(portIdx.split('.')[1]);
+      cross(dev, this.subifPort(portIdx), vlan === 1 ? null : vlan, []);
+    } else {
+      cross(dev, portIdx, null, []);
+    }
     while (queue.length) {
       const { sw, vlan, inPort, hops } = queue.shift();
       sw.ports.forEach((_, i) => {
@@ -109,12 +213,14 @@ const Sim = {
   /** Überträgt Switchport i Frames von VLAN v? (Access: genau ein VLAN, Trunk: alle VLANs des Switches) */
   carries(sw, i, v) {
     const p = sw.ports[i];
+    if (p.mode === 'routed') return false; // gerouteter Port (no switchport) gehört zu keinem VLAN
     return p.mode === 'trunk' ? sw.vlans.some(x => x.id === v) : p.vlan === v;
   },
 
   /** VLAN eines an Switchport i ankommenden Frames (tag = VLAN-Tag oder null), null = verworfen. */
   ingressVlan(sw, i, tag) {
     const sp = sw.ports[i];
+    if (sp.mode === 'routed') return null;
     let vlan;
     if (sp.mode === 'trunk') vlan = tag == null ? 1 : tag;
     else {
@@ -145,7 +251,7 @@ const Sim = {
     if (kind === 'init' || kind === 'load' || kind === 'undo') { this._settle = true; this._ripSettle = true; }
   },
 
-  stpOn(d) { return d.type === 'switch' && !!d.stp && d.stp.enabled; },
+  stpOn(d) { return this.isSwitch(d) && !!d.stp && d.stp.enabled; },
 
   /** Berechneter (konvergierter) STP-Zustand; wird nach jeder Änderung neu ermittelt. */
   stpData() {
@@ -231,7 +337,7 @@ const Sim = {
     const out = [], seen = new Set(), queue = [];
     const cross = (d, port, tag) => {
       const p = this.peer(d, port);
-      if (!p || !this.portUp(d, port) || !this.portUp(p.dev, p.port) || p.dev.type !== 'switch') return;
+      if (!p || !this.portUp(d, port) || !this.portUp(p.dev, p.port) || !this.isSwitch(p.dev)) return;
       const vlan = this.ingressVlan(p.dev, p.port, tag);
       if (vlan === null) return;
       if (this.stpOn(p.dev)) {
@@ -352,7 +458,7 @@ const Sim = {
     const find = k => { while (parent.has(k) && parent.get(k) !== k) k = parent.get(k); return k; };
     for (const l of Model.links) {
       const A = Model.get(l.a.dev), B = Model.get(l.b.dev);
-      if (!A || !B || A.type !== 'switch' || B.type !== 'switch') continue;
+      if (!A || !B || !this.isSwitch(A) || !this.isSwitch(B)) continue;
       for (const { id: v } of A.vlans) {
         if (!this.carries(A, l.a.port, v) || this.stpBlocked(A, l.a.port, v)) continue;
         const vb = this.ingressVlan(B, l.b.port, this.egressTag(A, l.a.port, v));
@@ -370,12 +476,14 @@ const Sim = {
   /** Routen eines Routers: direkt verbundene (C), statische (S) und per RIP gelernte (R). */
   routes(r) {
     const list = [];
-    r.ports.forEach((p, i) => {
+    for (const i of this.l3Ifaces(r)) {
       const f = this.portIp(r, i);
       if (f && this.portActive(r, i)) {
         list.push({ code: 'C', net: IP.network(f.ip, f.mask), mask: f.mask, port: i, ip: f.ip });
       }
-    });
+    }
+    // L3-Switch ohne "ip routing": nur direkt verbundene Netze (keine statischen Routen, kein RIP)
+    if (!this.routingOn(r)) return list;
     for (const s of r.routes) {
       const net = IP.parse(s.network), mask = IP.parseMask(s.mask), nh = IP.parse(s.nextHop);
       if (net === null || mask === null || nh === null) continue;
@@ -434,8 +542,9 @@ const Sim = {
         if (IP.sameNet(dst, f.ip, f.mask)) nh = dst;
         else if (f.gw !== null && IP.sameNet(f.gw, f.ip, f.mask)) nh = f.gw;
         else return { status: 'nogw', dev: cur, hops, srcIp };
-      } else if (cur.type === 'router') {
+      } else if (this.isRouterLike(cur)) {
         if (!first) {
+          if (!this.routingOn(cur)) return { status: 'timeout', dev: cur, hops, srcIp }; // routet nicht
           ttl--;
           if (ttl <= 0) return { status: 'ttl', dev: cur, from: this.ingressIp(cur, inPort), hops, srcIp };
         }
@@ -491,16 +600,40 @@ const Sim = {
 
   /* ---------------- DHCP ---------------- */
 
-  poolValid(s) {
-    const c = s.dhcp;
-    return c && IP.parse(c.start) !== null && IP.parseMask(c.mask) !== null && Number(c.max) > 0;
+  /** Alle DHCP-Pools (Server und Router), z. B. zum Aufräumen von Leases. */
+  allPools() {
+    const out = [];
+    for (const d of Model.devices) {
+      if (d.dhcp) out.push(d.dhcp);
+      if (d.dhcpd) out.push(...d.dhcpd.pools);
+    }
+    return out;
   },
 
-  dhcpServers(d) {
+  poolValid(c) {
+    return !!c && IP.parse(c.start) !== null && IP.parseMask(c.mask) !== null && Number(c.max) > 0;
+  },
+
+  /**
+   * DHCP-Angebote im Netzsegment des Clients: Server mit aktivem Dienst oder Router, dessen
+   * empfangende Schnittstelle (auch Subinterface) im Subnetz eines seiner Pools liegt.
+   */
+  dhcpOffers(d) {
     const reach = this.l2Reach(d, 0);
     if (reach.loop) return []; // Broadcast-Sturm: DHCP-Anfrage geht unter
-    return reach.map(e => e.dev)
-      .filter(s => s.type === 'server' && s.dhcp.enabled && this.poolValid(s));
+    const offers = [];
+    for (const e of reach) {
+      const s = e.dev;
+      if (s.type === 'server' && s.dhcp.enabled && this.poolValid(s.dhcp)) {
+        offers.push({ srv: s, pool: s.dhcp });
+      } else if (s.dhcpd && s.dhcpd.enabled) {
+        const f = this.portIp(s, e.port);
+        if (!f || !this.portActive(s, e.port)) continue;
+        const pool = s.dhcpd.pools.find(p => this.poolValid(p) && IP.sameNet(f.ip, IP.parse(p.start), IP.parseMask(p.mask)));
+        if (pool) offers.push({ srv: s, pool });
+      }
+    }
+    return offers;
   },
 
   usedIps(exceptId) {
@@ -510,20 +643,20 @@ const Sim = {
       if (this.isHost(d)) {
         const f = this.hostIface(d);
         if (f) used.add(f.ip);
-      } else if (d.type === 'router') {
-        for (const p of d.ports) { const ip = IP.parse(p.ip || ''); if (ip !== null) used.add(ip); }
+      } else if (this.isRouterLike(d)) {
+        for (const k of this.l3Ifaces(d)) { const ip = IP.parse(this.ifaceConfig(d, k).ip || ''); if (ip !== null) used.add(ip); }
       }
     }
     return used;
   },
 
   dhcpRequest(d) {
-    const srv = this.dhcpServers(d)[0];
-    if (!srv) {
+    const offer = this.dhcpOffers(d)[0];
+    if (!offer) {
       d.lease = this.apipa(d);
       return { ok: false, reason: 'noserver' };
     }
-    const c = srv.dhcp;
+    const srv = offer.srv, c = offer.pool;
     const start = IP.parse(c.start), mask = IP.parseMask(c.mask), max = Math.floor(Number(c.max));
     const used = this.usedIps(d.id);
     const inPool = x => x >= start && x < start + max && IP.sameNet(x, start, mask) && IP.isHostAddr(x, mask);
@@ -541,12 +674,13 @@ const Sim = {
     for (const id of Object.keys(c.leases)) if (!Model.get(id)) delete c.leases[id];
     c.leases[d.id] = IP.str(ip);
     d.lease = { ip: IP.str(ip), mask: IP.str(mask), gateway: IP.valid(c.gateway) ? c.gateway : '', server: srv.id };
+    if (srv.type === 'router') d.lease.pool = c.name;
     return { ok: true, server: srv };
   },
 
   /** Lease zurückgeben. released=true: wie "ipconfig /release" (keine automatische Neuanfrage). */
   release(d, released = false) {
-    for (const s of Model.devices) if (s.dhcp) delete s.dhcp.leases[d.id];
+    for (const pool of this.allPools()) delete pool.leases[d.id];
     d.lease = released ? { ip: '', mask: '', gateway: '', released: true } : null;
   },
 
@@ -577,8 +711,10 @@ const Sim = {
       if (this.isHost(d)) {
         const f = this.hostIface(d);
         if (f && f.ip === ip) names.push(d.name);
-      } else if (d.type === 'router') {
-        d.ports.forEach(p => { if (IP.parse(p.ip || '') === ip) names.push(`${d.name} ${p.name}`); });
+      } else if (this.isRouterLike(d)) {
+        for (const k of this.l3Ifaces(d)) {
+          if (IP.parse(this.ifaceConfig(d, k).ip || '') === ip) names.push(`${d.name} ${this.ifaceName(d, k)}`);
+        }
       }
     }
     return names;
@@ -603,24 +739,29 @@ const Sim = {
     return w;
   },
 
-  routerPortWarnings(r, i) {
+  /** Warnungen zu einer L3-Schnittstelle (Router-Port, gerouteter Port, SVI). */
+  ifaceWarnings(r, i) {
     const w = [];
-    const p = r.ports[i];
+    const p = this.ifaceConfig(r, i);
+    if (!p) return w;
     const ip = IP.parse(p.ip || ''), mask = IP.parseMask(p.mask || '');
     if (ip === null) return w;
     if (mask === null) { w.push('Subnetzmaske fehlt.'); return w; }
     if (!IP.isHostAddr(ip, mask)) w.push('Netz- oder Broadcastadresse ist als Schnittstellenadresse ungültig.');
-    r.ports.forEach((q, j) => {
-      if (j === i) return;
+    for (const j of this.l3Ifaces(r)) {
+      if (j === i) continue;
+      const q = this.ifaceConfig(r, j);
       const qi = IP.parse(q.ip || ''), qm = IP.parseMask(q.mask || '');
-      if (qi === null || qm === null) return;
+      if (qi === null || qm === null) continue;
       const m = IP.fromPrefix(Math.min(IP.prefixLen(mask), IP.prefixLen(qm)));
-      if (IP.sameNet(ip, qi, m)) w.push(`Subnetz überschneidet sich mit ${q.name}.`);
-    });
+      if (IP.sameNet(ip, qi, m)) w.push(`Subnetz überschneidet sich mit ${this.ifaceName(r, j)}.`);
+    }
     const others = this.ipUsers(ip, r);
     if (others.length) w.push('IP-Adresse doppelt vergeben: ' + others.join(', '));
     return w;
   },
+
+  routerPortWarnings(r, i) { return this.ifaceWarnings(r, i); },
 
   /**
    * Statische Route aus Text lesen:

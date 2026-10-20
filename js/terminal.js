@@ -32,7 +32,7 @@ class Terminal {
     this.input.addEventListener('keydown', e => this.onKey(e));
 
     this.println(this.isRouter()
-      ? `NetSim Router-CLI (${dev.name})\nGeben Sie "?" ein, um die verfügbaren Befehle anzuzeigen.\n`
+      ? `NetSim CLI (${dev.name})\nGeben Sie "?" ein, um die verfügbaren Befehle anzuzeigen.\n`
       : 'NetSim Kommandozeile 1.0\nGeben Sie "help" ein, um die verfügbaren Befehle anzuzeigen.\n');
     this.updatePrompt();
   }
@@ -42,7 +42,7 @@ class Terminal {
     App.toast(`Broadcast-Sturm: Schleife ohne Spanning Tree${v.length ? ' in VLAN ' + v.join(', ') : ''} – Pakete gehen verloren.`, 'warn');
   }
 
-  isRouter() { return this.dev.type === 'router'; }
+  isRouter() { return Sim.isRouterLike(this.dev); }
   prompt() { return this.isRouter() ? this.dev.name + '#' : 'C:\\>'; }
   updatePrompt() { if (!this.busy) this.pr.textContent = this.prompt(); }
   focus() { this.input.focus({ preventScroll: true }); }
@@ -161,8 +161,14 @@ class Terminal {
       L('DHCP Enabled', d.ip.mode === 'dhcp' ? 'Yes' : 'No');
       if (d.ip.mode === 'dhcp' && d.lease && d.lease.server) {
         const s = Model.get(d.lease.server);
-        const sf = s && Sim.hostIface(s);
-        L('DHCP Server', sf ? IP.str(sf.ip) : '0.0.0.0');
+        // Server: seine Adresse; Router: die Schnittstelle im Subnetz des Clients
+        let sip = s && Sim.hostIface(s) ? Sim.hostIface(s).ip : null;
+        if (s && sip === null && Sim.isRouterLike(s)) {
+          const lip = IP.parse(d.lease.ip), lm = IP.parseMask(d.lease.mask);
+          const k = Sim.l3Ifaces(s).find(k => { const f = Sim.portIp(s, k); return f && IP.sameNet(f.ip, lip, lm); });
+          if (k !== undefined) sip = Sim.portIp(s, k).ip;
+        }
+        L('DHCP Server', sip !== null ? IP.str(sip) : '0.0.0.0');
       }
     }
     L('Connection-specific DNS Suffix', '');
@@ -261,6 +267,8 @@ class Terminal {
         '  show ip interface brief       Schnittstellenübersicht',
         '  show running-config           aktuelle Konfiguration',
         '  show ip protocols             Routing-Protokolle (RIP)',
+        ...(this.dev.type === 'l3switch' ? ['  show vlan brief               VLAN-Übersicht'] : []),
+        ...(this.dev.type === 'router' ? ['  show ip dhcp binding          vergebene DHCP-Adressen'] : []),
         '  clear                         Bildschirm löschen',
         '',
       ].join('\n'));
@@ -272,8 +280,12 @@ class Terminal {
       this.showIpRoute();
     } else if (is(a[0], 'show', 2) && is(a[1], 'ip', 2) && is(a[2], 'interface', 3) && is(a[3], 'brief', 1)) {
       this.showIpIntBrief();
+    } else if (this.dev.type === 'router' && is(a[0], 'show', 2) && is(a[1], 'ip', 2) && is(a[2], 'dhcp', 2) && is(a[3], 'binding', 1)) {
+      this.showDhcpBinding();
     } else if (is(a[0], 'show', 2) && is(a[1], 'ip', 2) && is(a[2], 'protocols', 4)) {
       this.showIpProtocols();
+    } else if (this.dev.type === 'l3switch' && is(a[0], 'show', 2) && is(a[1], 'vlan', 1) && (!a[2] || is(a[2], 'brief', 1))) {
+      this.showVlanBrief();
     } else if (is(a[0], 'show', 2) && (is(a[1], 'running-config', 3) || is(a[1], 'run', 3))) {
       this.showRun();
     } else if (is(a[0], 'clear', 3) || a[0].toLowerCase() === 'cls') {
@@ -329,14 +341,23 @@ class Terminal {
 
   showIpRoute() {
     const r = this.dev;
+    if (!Sim.routingOn(r)) {
+      // L3-Switch ohne "ip routing": wie bei Cisco keine Routingtabelle
+      this.println('Default gateway is not set\n');
+      this.println('Host               Gateway           Last Use    Total Uses  Interface');
+      this.println('ICMP redirect cache is empty\n');
+      this.println('% IP-Routing ist deaktiviert (ip routing im Reiter „Routing“ einschalten).\n');
+      return;
+    }
     const entries = [];
-    r.ports.forEach((p, i) => {
+    for (const i of Sim.l3Ifaces(r)) {
       const f = Sim.portIp(r, i);
       if (f && Sim.portActive(r, i)) {
-        entries.push({ net: IP.network(f.ip, f.mask), len: IP.prefixLen(f.mask), text: `C    ${IP.cidr(IP.network(f.ip, f.mask), f.mask)} is directly connected, ${longPortName(p.name)}` });
-        entries.push({ net: f.ip, len: 32, text: `L    ${IP.str(f.ip)}/32 is directly connected, ${longPortName(p.name)}` });
+        const n = Sim.ifaceLong(r, i);
+        entries.push({ net: IP.network(f.ip, f.mask), len: IP.prefixLen(f.mask), text: `C    ${IP.cidr(IP.network(f.ip, f.mask), f.mask)} is directly connected, ${n}` });
+        entries.push({ net: f.ip, len: 32, text: `L    ${IP.str(f.ip)}/32 is directly connected, ${n}` });
       }
-    });
+    }
     let gw = null;
     for (const s of r.routes) {
       const net = IP.parse(s.network), mask = IP.parseMask(s.mask), nh = IP.parse(s.nextHop);
@@ -348,7 +369,7 @@ class Terminal {
     for (const e of Sim.ripRoutes(r)) {
       const len = IP.prefixLen(e.mask);
       if (len === 0 && gw === null) gw = IP.str(e.nextHop);
-      entries.push({ net: e.net, len, text: `${len === 0 ? 'R*' : 'R '}   ${IP.cidr(e.net, e.mask)} [120/${e.metric}] via ${IP.str(e.nextHop)}, 00:00:0${Math.floor(Math.random() * 5)}, ${longPortName(r.ports[e.port].name)}` });
+      entries.push({ net: e.net, len, text: `${len === 0 ? 'R*' : 'R '}   ${IP.cidr(e.net, e.mask)} [120/${e.metric}] via ${IP.str(e.nextHop)}, 00:00:0${Math.floor(Math.random() * 5)}, ${Sim.ifaceLong(r, e.port)}` });
     }
     entries.sort((x, y) => (x.net - y.net) || (x.len - y.len));
     this.println('Codes: L - local, C - connected, S - static, R - RIP, O - OSPF');
@@ -360,7 +381,7 @@ class Terminal {
 
   showIpProtocols() {
     const r = this.dev;
-    if (!r.rip.enabled) { this.println(''); return; }
+    if (!Sim.ripOn(r)) { this.println(''); return; }
     const sec = Sim.RIP_INTERVAL / 1000;
     const L = [
       'Routing Protocol is "rip"',
@@ -372,13 +393,14 @@ class Terminal {
       '  Interface             Send  Recv  Triggered RIP  Key-chain',
     ];
     for (const i of Sim.ripIfaces(r)) {
-      if (!r.rip.passive.includes(i)) L.push(`  ${longPortName(r.ports[i].name).padEnd(22)}2     2`);
+      if (!r.rip.passive.includes(i)) L.push(`  ${Sim.ifaceLong(r, i).padEnd(22)}2     2`);
     }
     L.push('Automatic network summarization is not in effect', 'Maximum path: 1', 'Routing for Networks:');
     for (const n of r.rip.networks) L.push(`    ${n}`);
-    if (r.rip.passive.length) {
+    const passive = r.rip.passive.filter(k => Sim.l3Ifaces(r).includes(k));
+    if (passive.length) {
       L.push('Passive Interface(s):');
-      for (const i of r.rip.passive) L.push(`    ${longPortName(r.ports[i].name)}`);
+      for (const i of passive) L.push(`    ${Sim.ifaceLong(r, i)}`);
     }
     L.push('Routing Information Sources:', '    Gateway         Distance      Last Update');
     for (const e of Sim.ripData().edges.filter(e => e.to === r)) L.push(`    ${IP.str(e.nh).padEnd(16)}120           00:00:0${Math.floor(Math.random() * 5)}`);
@@ -388,32 +410,109 @@ class Terminal {
 
   showIpIntBrief() {
     const r = this.dev;
+    const row = (name, ipStr, status, proto) => this.println(
+      `${name.padEnd(23)}${(ipStr || 'unassigned').padEnd(16)}YES ${(ipStr ? 'manual' : 'unset').padEnd(7)}${status.padEnd(22)}${proto}`);
     this.println('Interface              IP-Address      OK? Method Status                Protocol');
     r.ports.forEach((p, i) => {
-      const ip = IP.parse(p.ip || '');
-      const status = !p.up ? 'administratively down' : Sim.portActive(r, i) ? 'up' : 'down';
-      const proto = p.up && Sim.portActive(r, i) ? 'up' : 'down';
-      this.println(`${longPortName(p.name).padEnd(23)}${(ip !== null ? IP.str(ip) : 'unassigned').padEnd(16)}YES ${(ip !== null ? 'manual' : 'unset').padEnd(7)}${status.padEnd(22)}${proto}`);
+      const c = Sim.ifaceConfig(r, i);
+      const ip = c ? IP.parse(c.ip || '') : null;
+      const admin = r.type === 'router' && !p.up;
+      const act = Sim.portActive(r, i);
+      row(longPortName(p.name), ip !== null ? IP.str(ip) : '', admin ? 'administratively down' : act ? 'up' : 'down', act ? 'up' : 'down');
     });
+    for (const s of r.subifs || []) {
+      const k = s.port + '.' + s.vlan;
+      const ip = IP.parse(s.ip || '');
+      const act = Sim.portActive(r, k);
+      row(Sim.ifaceLong(r, k), ip !== null ? IP.str(ip) : '', !r.ports[s.port].up ? 'administratively down' : act ? 'up' : 'down', act ? 'up' : 'down');
+    }
+    for (const s of r.svis || []) {
+      const ip = IP.parse(s.ip || '');
+      const up = Sim.sviLineUp(r, 'v' + s.vlan);
+      row(`Vlan${s.vlan}`, ip !== null ? IP.str(ip) : '', !s.up ? 'administratively down' : up ? 'up' : 'down', up ? 'up' : 'down');
+    }
+    this.println('');
+  }
+
+  showDhcpBinding() {
+    const r = this.dev;
+    this.println('IP address       Client-ID/              Lease expiration        Type');
+    this.println('                 Hardware address');
+    for (const d of Model.devices) {
+      if (!Sim.isHost(d) || d.ip.mode !== 'dhcp' || !d.lease || d.lease.server !== r.id || d.lease.apipa || d.lease.released) continue;
+      this.println(`${d.lease.ip.padEnd(17)}${Sim.mac(d).padEnd(24)}--                      Automatic`);
+    }
+    this.println('');
+  }
+
+  showVlanBrief() {
+    const r = this.dev;
+    this.println('VLAN Name                             Status    Ports');
+    this.println('---- -------------------------------- --------- -------------------------------');
+    for (const v of r.vlans) {
+      const ports = r.ports.filter(p => p.mode === 'access' && p.vlan === v.id).map(p => p.name).join(', ');
+      this.println(`${String(v.id).padEnd(5)}${v.name.slice(0, 32).padEnd(33)}active    ${ports}`);
+    }
     this.println('');
   }
 
   showRun() {
     const r = this.dev;
     const L = [];
+    const addr = c => {
+      const ip = IP.parse(c.ip || ''), mask = IP.parseMask(c.mask || '');
+      return ip !== null && mask !== null ? ` ip address ${IP.str(ip)} ${IP.str(mask)}` : ' no ip address';
+    };
     L.push('Building configuration...\n', '!', `hostname ${r.name}`, '!');
-    for (const p of r.ports) {
-      L.push(`interface ${longPortName(p.name)}`);
-      const ip = IP.parse(p.ip || ''), mask = IP.parseMask(p.mask || '');
-      L.push(ip !== null && mask !== null ? ` ip address ${IP.str(ip)} ${IP.str(mask)}` : ' no ip address');
-      if (!p.up) L.push(' shutdown');
+    if (r.type === 'l3switch') {
+      if (r.ipRouting) L.push('ip routing', '!');
+      if (!r.stp.enabled) L.push(`no spanning-tree vlan ${r.vlans.map(v => v.id).join(',')}`);
+      else {
+        L.push('spanning-tree mode pvst');
+        if (r.stp.priority !== 32768) L.push(`spanning-tree vlan ${r.vlans.map(v => v.id).join(',')} priority ${r.stp.priority}`);
+      }
       L.push('!');
+      for (const v of r.vlans) if (v.id !== 1) L.push(`vlan ${v.id}`, ` name ${v.name}`, '!');
+      for (const p of r.ports) {
+        L.push(`interface ${longPortName(p.name)}`);
+        if (p.mode === 'routed') L.push(' no switchport', addr(p));
+        else if (p.mode === 'trunk') L.push(' switchport trunk encapsulation dot1q', ' switchport mode trunk');
+        else { if (p.vlan !== 1) L.push(` switchport access vlan ${p.vlan}`); L.push(' switchport mode access'); }
+        L.push('!');
+      }
+      for (const s of r.svis) {
+        L.push(`interface Vlan${s.vlan}`, addr(s));
+        if (!s.up) L.push(' shutdown');
+        L.push('!');
+      }
+    } else {
+      r.ports.forEach((p, i) => {
+        L.push(`interface ${longPortName(p.name)}`, addr(p));
+        if (!p.up) L.push(' shutdown');
+        L.push('!');
+        for (const s of r.subifs.filter(x => x.port === i)) {
+          L.push(`interface ${Sim.ifaceLong(r, s.port + '.' + s.vlan)}`, ` encapsulation dot1Q ${s.vlan}${s.vlan === 1 ? ' native' : ''}`, addr(s), '!');
+        }
+      });
+      if (r.dhcpd && r.dhcpd.pools.length) {
+        if (!r.dhcpd.enabled) L.push('no service dhcp', '!');
+        for (const p of r.dhcpd.pools) {
+          const st = IP.parse(p.start), mk = IP.parseMask(p.mask);
+          L.push(`ip dhcp pool ${p.name}`);
+          if (st !== null && mk !== null) L.push(` network ${IP.str(IP.network(st, mk))} ${IP.str(mk)}`);
+          if (IP.valid(p.gateway)) L.push(` default-router ${p.gateway}`);
+          if (st !== null) L.push(` ! NetSim: vergibt ab ${p.start}, max. ${p.max} Adressen`);
+          L.push('!');
+        }
+      }
     }
     for (const s of r.routes) L.push(`ip route ${s.network} ${s.mask} ${s.nextHop}`);
     if (r.routes.length) L.push('!');
     if (r.rip.enabled) {
       L.push('router rip', ' version 2');
-      for (const i of r.rip.passive) L.push(` passive-interface ${longPortName(r.ports[i].name)}`);
+      for (const i of r.rip.passive) {
+        if (Sim.l3Ifaces(r).includes(i)) L.push(` passive-interface ${Sim.ifaceLong(r, i)}`);
+      }
       for (const n of r.rip.networks) L.push(` network ${n}`);
       if (r.rip.defaultOriginate) L.push(' default-information originate');
       L.push(' no auto-summary', '!');

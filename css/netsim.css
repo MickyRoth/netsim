@@ -72,16 +72,17 @@ kbd { border: 1px solid #c3ccd6; border-bottom-width: 2px; border-radius: 4px; p
 
 /* ---------- Layout ---------- */
 
-#main { display: grid; grid-template-columns: 132px 1fr; min-height: 0; }
+#main { display: grid; grid-template-columns: 140px 1fr; min-height: 0; }
 
 #palette {
   background: #f7f9fb;
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 8px;
   user-select: none;
 }
-.pal-group { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin: 6px 4px 6px; text-align: center; }
+.pal-group { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .2px; margin: 6px 0; text-align: center; white-space: nowrap; }
 .pal-item {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 10px 4px 8px; margin-bottom: 6px;
@@ -193,7 +194,7 @@ input.invalid { border-color: var(--err); background: #fff5f5; }
 .win-kind { color: #c9d6e6; font-size: 12px; }
 .win-close { margin-left: auto; border: 0; background: none; color: #fff; cursor: pointer; font-size: 14px; width: 26px; height: 24px; border-radius: 4px; }
 .win-close:hover { background: #e5484d; }
-.win-tabs { display: flex; gap: 2px; padding: 6px 8px 0; background: #eef1f5; border-bottom: 1px solid var(--border); flex: none; }
+.win-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: #eef1f5; border-bottom: 1px solid var(--border); flex: none; }
 .win-tabs button {
   border: 1px solid transparent; border-bottom: 0; background: none;
   padding: 6px 14px; border-radius: 6px 6px 0 0; cursor: pointer; color: #45505c;
@@ -243,6 +244,10 @@ fieldset.box legend { font-weight: 600; padding: 0 5px; color: #2c3a4a; }
 .stp-state.blk { background: #f59e0b; }
 .stp-state.lis { background: var(--err); }
 .stp-root { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: #b45309; background: #fef3c7; border-radius: 4px; padding: 1px 6px; }
+
+details.subifs { border-top: 1px dashed var(--border); padding-top: 6px; }
+details.subifs summary { cursor: pointer; color: #2c3a4a; font-weight: 600; margin-bottom: 6px; }
+details.subifs[open] summary { margin-bottom: 8px; }
 
 /* ---------- Terminal ---------- */
 

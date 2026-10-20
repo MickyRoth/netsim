@@ -28,6 +28,7 @@ const Win = {
     const n = this.count++ % 8;
     el.style.left = Math.max(10, Math.min(window.innerWidth - 580, 180 + n * 30)) + 'px';
     el.style.top = Math.max(10, Math.min(window.innerHeight - 540, 70 + n * 30)) + 'px';
+    if (dev.type === 'l3switch') el.style.width = '660px';
     document.getElementById('windows').appendChild(el);
 
     const w = { id: dev.id, dev, el, panes: {}, tab: null };
@@ -230,7 +231,7 @@ function hostConfigPane(dev) {
     if (l.released) return 'Adresse freigegeben (ipconfig /release). „DHCP neu anfordern“ holt eine neue.';
     if (l.apipa) return 'Kein DHCP-Server erreichbar – automatische APIPA-Adresse vergeben.';
     const s = Model.get(l.server);
-    return `Adresse vom DHCP-Server ${s ? s.name : '?'} erhalten.`;
+    return `Adresse vom DHCP-Server ${s ? s.name : '?'}${l.pool ? ` (Pool ${l.pool})` : ''} erhalten.`;
   };
 
   return {
@@ -285,7 +286,7 @@ function dhcpServicePane(dev) {
       if (document.activeElement !== max) max.value = c.max;
       binds.forEach(b => b.refresh());
       const w = [];
-      if (c.enabled && !Sim.poolValid(dev)) w.push('Pool unvollständig: Start-IP, Subnetzmaske und Anzahl angeben.');
+      if (c.enabled && !Sim.poolValid(c)) w.push('Pool unvollständig: Start-IP, Subnetzmaske und Anzahl angeben.');
       const st = IP.parse(c.start), mk = IP.parseMask(c.mask), gw = IP.parse(c.gateway);
       if (st !== null && mk !== null && gw !== null && !IP.sameNet(st, gw, mk)) w.push('Gateway liegt nicht im Subnetz des Pools.');
       if (c.enabled && !Sim.hostIface(dev)) w.push('Der Server selbst hat noch keine IP-Adresse.');
@@ -323,7 +324,8 @@ function switchPortsPane(dev) {
       <tbody></tbody>
     </table>
     <p class="meta"><b>Access</b>: Port gehört genau einem VLAN an (für PCs, Server, Router).<br>
-    <b>Trunk</b>: Port überträgt alle VLANs zu einem anderen Switch (VLAN 1 ungetaggt als natives VLAN).</p>`);
+    <b>Trunk</b>: Port überträgt alle VLANs zu einem anderen Switch (VLAN 1 ungetaggt als natives VLAN).${dev.type === 'l3switch'
+      ? '<br><b>Routed</b> (no switchport): Port arbeitet wie ein Router-Port mit eigener IP-Adresse (Reiter „SVI / L3“).' : ''}</p>`);
   const name = nameRow(dev);
   el.prepend(name.row);
   const tb = el.querySelector('tbody');
@@ -334,7 +336,7 @@ function switchPortsPane(dev) {
     tb.innerHTML = dev.ports.map((p, i) => `<tr>
       <td><b>${esc(p.name)}</b></td>
       <td data-peer="${i}"></td>
-      <td><select data-mode="${i}"><option value="access">Access</option><option value="trunk">Trunk</option></select></td>
+      <td><select data-mode="${i}"><option value="access">Access</option><option value="trunk">Trunk</option>${dev.type === 'l3switch' ? '<option value="routed">Routed</option>' : ''}</select></td>
       <td><select data-vlan="${i}">${opts}</select></td></tr>`).join('');
     tb.querySelectorAll('[data-mode]').forEach(s => s.addEventListener('change', () => {
       dev.ports[+s.dataset.mode].mode = s.value; commit();
@@ -354,8 +356,9 @@ function switchPortsPane(dev) {
         tb.querySelector(`[data-mode="${i}"]`).value = p.mode;
         const vs = tb.querySelector(`[data-vlan="${i}"]`);
         vs.value = String(p.vlan);
-        vs.disabled = p.mode === 'trunk';
-        vs.title = p.mode === 'trunk' ? 'Trunk-Ports übertragen alle VLANs' : '';
+        vs.disabled = p.mode !== 'access';
+        vs.title = p.mode === 'trunk' ? 'Trunk-Ports übertragen alle VLANs'
+          : p.mode === 'routed' ? 'Gerouteter Port – IP-Adresse im Reiter „SVI / L3“' : '';
       });
     },
   };
@@ -517,6 +520,22 @@ function routerIfacePane(dev) {
       <div class="row"><label>IPv4-Adresse</label><input type="text" data-ip="${i}" placeholder="z. B. 192.168.${i + 1}.1" spellcheck="false"></div>
       <div class="row"><label>Subnetzmaske</label><input type="text" data-mask="${i}" placeholder="255.255.255.0 oder /24" spellcheck="false"></div>
       <div class="warn" data-w="${i}"></div>
+      <details class="subifs" data-sub="${i}">
+        <summary>Subinterfaces (802.1Q, „Router on a Stick“) <span class="meta" data-subcount="${i}"></span></summary>
+        <table class="tbl">
+          <thead><tr><th>Subinterface</th><th>VLAN</th><th>IPv4-Adresse</th><th>Subnetzmaske</th><th style="width:36px"></th></tr></thead>
+          <tbody data-subrows="${i}"></tbody>
+        </table>
+        <div class="add-row">
+          <input type="number" min="1" max="4094" placeholder="VLAN-ID" data-subnew="${i}">
+          <button class="btn" data-subadd="${i}">Subinterface anlegen</button>
+        </div>
+        <div class="err" data-suberr="${i}"></div>
+        <div class="warn" data-subw="${i}"></div>
+        <p class="meta">Der Switchport auf der Gegenseite muss ein <b>Trunk</b> sein. Jedes Subinterface empfängt und sendet
+          getaggte Frames seines VLANs (<code>encapsulation dot1Q</code>) und ist das Gateway dieses VLANs.
+          VLAN 1 ist das native VLAN (ungetaggt).</p>
+      </details>
     </fieldset>`).join(''));
   const name = nameRow(dev);
   el.prepend(name.row);
@@ -525,13 +544,64 @@ function routerIfacePane(dev) {
     binds.push(bindIpInput(el.querySelector(`[data-ip="${i}"]`), 'ip', () => p.ip, v => { p.ip = v; autoMask(p, v); }));
     binds.push(bindIpInput(el.querySelector(`[data-mask="${i}"]`), 'mask', () => p.mask, v => { p.mask = v; }));
     el.querySelector(`[data-up="${i}"]`).addEventListener('change', e => { p.up = e.target.checked; commit(); });
+
+    // Subinterfaces dieses Ports
+    const err = el.querySelector(`[data-suberr="${i}"]`);
+    const addSub = () => {
+      const inp = el.querySelector(`[data-subnew="${i}"]`);
+      const v = Number(inp.value);
+      err.textContent = '';
+      if (!Number.isInteger(v) || v < 1 || v > 4094) { err.textContent = 'Bitte eine VLAN-ID zwischen 1 und 4094 eingeben.'; return; }
+      if (dev.subifs.some(s => s.port === i && s.vlan === v)) { err.textContent = `${p.name}.${v} existiert bereits.`; return; }
+      dev.subifs.push({ port: i, vlan: v, ip: '', mask: '' });
+      dev.subifs.sort((a, b) => (a.port - b.port) || (a.vlan - b.vlan));
+      inp.value = '';
+      commit();
+    };
+    el.querySelector(`[data-subadd="${i}"]`).addEventListener('click', addSub);
+    el.querySelector(`[data-subnew="${i}"]`).addEventListener('keydown', e => { if (e.key === 'Enter') addSub(); });
   });
+
+  let subSig = null, subBinds = [];
+  const renderSubs = () => {
+    subBinds = [];
+    dev.ports.forEach((p, i) => {
+      const subs = dev.subifs.filter(s => s.port === i);
+      const tb = el.querySelector(`[data-subrows="${i}"]`);
+      tb.innerHTML = subs.length ? subs.map(s => `<tr>
+          <td><b>${esc(p.name)}.${s.vlan}</b></td><td>${s.vlan}${s.vlan === 1 ? ' (nativ)' : ''}</td>
+          <td><input type="text" data-sip="${s.vlan}" spellcheck="false" placeholder="z. B. 192.168.${s.vlan % 256}.1"></td>
+          <td><input type="text" data-smask="${s.vlan}" spellcheck="false" placeholder="/24"></td>
+          <td><button class="btn-icon" data-sdel="${s.vlan}" title="Subinterface löschen">✕</button></td></tr>`).join('')
+        : '<tr><td colspan="5" class="empty">Keine Subinterfaces.</td></tr>';
+      for (const s of subs) {
+        subBinds.push(bindIpInput(tb.querySelector(`[data-sip="${s.vlan}"]`), 'ip', () => s.ip, v => { s.ip = v; autoMask(s, v); }));
+        subBinds.push(bindIpInput(tb.querySelector(`[data-smask="${s.vlan}"]`), 'mask', () => s.mask, v => { s.mask = v; }));
+        tb.querySelector(`[data-sdel="${s.vlan}"]`).addEventListener('click', () => {
+          const k = s.port + '.' + s.vlan;
+          dev.subifs = dev.subifs.filter(x => x !== s);
+          dev.rip.passive = dev.rip.passive.filter(x => x !== k);
+          commit();
+        });
+      }
+      // Bereich mit vorhandenen Subinterfaces geöffnet anzeigen
+      if (subs.length) el.querySelector(`[data-sub="${i}"]`).open = true;
+    });
+  };
+
   return {
     el,
     update() {
       name.update();
+      const sig = dev.subifs.map(s => s.port + '.' + s.vlan).join(',');
+      if (sig !== subSig) { subSig = sig; renderSubs(); }
       binds.forEach(b => b.refresh());
+      subBinds.forEach(b => b.refresh());
       dev.ports.forEach((p, i) => {
+        const keys = dev.subifs.filter(s => s.port === i).map(s => s.port + '.' + s.vlan);
+        el.querySelector(`[data-subcount="${i}"]`).textContent = keys.length ? `– ${keys.length} angelegt` : '';
+        el.querySelector(`[data-subw="${i}"]`).innerHTML =
+          warnHtml(keys.flatMap(k => Sim.ifaceWarnings(dev, k).map(w => `${Sim.ifaceName(dev, k)}: ${w}`)));
         el.querySelector(`[data-up="${i}"]`).checked = !!p.up;
         const peer = Sim.peer(dev, i);
         const st = el.querySelector(`[data-st="${i}"]`);
@@ -545,7 +615,14 @@ function routerIfacePane(dev) {
 }
 
 function routingPane(dev) {
-  const el = makePane(`
+  const el = makePane(`${dev.type === 'l3switch' ? `
+    <fieldset class="box">
+      <legend>IP-Routing</legend>
+      <div class="row"><label>ip routing</label><label class="chk"><input type="checkbox" data-f="iprouting"> IP-Routing aktiviert</label></div>
+      <p class="meta">Wie bei Cisco standardmäßig aus. Ohne IP-Routing arbeitet der Switch nur auf Schicht 2: Seine
+        IP-Schnittstellen sind erreichbar (z.&nbsp;B. zur Verwaltung), er routet aber nicht zwischen VLANs und Netzen;
+        statische Routen und RIP werden nicht verwendet.</p>
+    </fieldset>` : ''}
     <fieldset class="box">
       <legend>Statische Routen</legend>
       <table class="tbl">
@@ -581,6 +658,8 @@ function routingPane(dev) {
   };
   q('[data-act=add]').addEventListener('click', add);
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+  const iprBox = q('[data-f=iprouting]');
+  if (iprBox) iprBox.addEventListener('change', () => { dev.ipRouting = iprBox.checked; commit(); });
   q('[data-dyn=routes]').addEventListener('click', e => {
     const b = e.target.closest('[data-del]');
     if (!b) return;
@@ -591,12 +670,14 @@ function routingPane(dev) {
   return {
     el,
     update() {
+      const ipr = q('[data-f=iprouting]');
+      if (ipr) ipr.checked = !!dev.ipRouting;
       const tb = q('[data-dyn=routes]');
       tb.innerHTML = dev.routes.length ? dev.routes.map((r, i) => {
         const nh = IP.parse(r.nextHop);
         const via = nh !== null ? Sim.lookup(dev, nh) : null;
         const st = via
-          ? `<span class="ok-text">✓ über ${esc(dev.ports[via.port].name)}</span>`
+          ? `<span class="ok-text">✓ über ${esc(Sim.ifaceName(dev, via.port))}</span>`
           : '<span class="warn">⚠ Next Hop nicht erreichbar</span>';
         const net = IP.parse(r.network), mk = IP.parseMask(r.mask);
         const cidr = net !== null && mk !== null ? IP.cidr(net, mk) : `${r.network} ${r.mask}`;
@@ -606,11 +687,11 @@ function routingPane(dev) {
 
       const rt = Sim.routes(dev).map(e => {
         let via;
-        if (e.code === 'C') via = `direkt verbunden, ${dev.ports[e.port].name}`;
+        if (e.code === 'C') via = `direkt verbunden, ${Sim.ifaceName(dev, e.port)}`;
         else {
           const r = Sim.lookup(dev, e.nextHop);
           via = (e.code === 'R' ? `[120/${e.metric}] ` : '[1/0] ') + `via ${IP.str(e.nextHop)}` +
-            (r ? `, ${dev.ports[r.port].name}` : ' (inaktiv)');
+            (r ? `, ${Sim.ifaceName(dev, r.port)}` : ' (inaktiv)');
         }
         return { e, html: `<tr><td style="width:30px"><span class="badge ${e.code}">${e.code}</span></td><td>${IP.cidr(e.net, e.mask)}</td><td>${esc(via)}</td></tr>` };
       }).sort((a, b) => (a.e.net - b.e.net) || (IP.prefixLen(a.e.mask) - IP.prefixLen(b.e.mask)));
@@ -645,8 +726,7 @@ function ripPane(dev) {
     </fieldset>
     <fieldset class="box">
       <legend>Optionen</legend>
-      <div class="row"><label>Passive Interfaces</label><div class="inline">${dev.ports.map((p, i) =>
-        `<label class="chk"><input type="checkbox" data-passive="${i}"> ${esc(p.name)}</label>`).join('')}</div></div>
+      <div class="row"><label>Passive Interfaces</label><div class="inline" data-dyn="passive"></div></div>
       <div class="row"><label>Standardroute</label><label class="chk"><input type="checkbox" data-f="orig"> an Nachbarn weitergeben (default-information originate)</label></div>
       <p class="meta">Passive Interfaces senden keine Updates (z. B. zu einem LAN nur mit PCs), ihr Netz wird aber weiterhin bekannt gegeben.</p>
     </fieldset>
@@ -669,11 +749,17 @@ function ripPane(dev) {
   const err = q('[data-dyn=err]'), note = q('[data-dyn=note]');
   en.addEventListener('change', () => { c.enabled = en.checked; commit(); });
   orig.addEventListener('change', () => { c.defaultOriginate = orig.checked; commit(); });
-  el.querySelectorAll('[data-passive]').forEach(cb => cb.addEventListener('change', () => {
-    const i = Number(cb.dataset.passive);
-    c.passive = cb.checked ? [...new Set([...c.passive, i])].sort() : c.passive.filter(x => x !== i);
+  // Passive Interfaces: Liste hängt beim L3-Switch von SVIs/gerouteten Ports ab
+  const passiveBox = q('[data-dyn=passive]');
+  let passiveSig = null;
+  const ifKey = s => (/^\d+$/.test(s) ? Number(s) : s);
+  passiveBox.addEventListener('change', e => {
+    const cb = e.target.closest('[data-passive]');
+    if (!cb) return;
+    const k = ifKey(cb.dataset.passive);
+    c.passive = cb.checked ? [...new Set([...c.passive, k])] : c.passive.filter(x => x !== k);
     commit();
-  }));
+  });
   const add = () => {
     err.textContent = '';
     note.textContent = '';
@@ -704,18 +790,27 @@ function ripPane(dev) {
     update() {
       en.checked = c.enabled;
       orig.checked = c.defaultOriginate;
-      el.querySelectorAll('[data-passive]').forEach(cb => { cb.checked = c.passive.includes(Number(cb.dataset.passive)); });
+      const ifs = Sim.l3Ifaces(dev);
+      const sig = ifs.join(',');
+      if (sig !== passiveSig) {
+        passiveSig = sig;
+        passiveBox.innerHTML = ifs.length ? ifs.map(k =>
+          `<label class="chk"><input type="checkbox" data-passive="${k}"> ${esc(Sim.ifaceName(dev, k))}</label>`).join('')
+          : '<span class="meta">keine L3-Schnittstellen</span>';
+      }
+      passiveBox.querySelectorAll('[data-passive]').forEach(cb => { cb.checked = c.passive.includes(ifKey(cb.dataset.passive)); });
 
       const state = q('[data-dyn=state]');
       if (!c.enabled) { state.className = 'meta'; state.textContent = 'deaktiviert'; }
+      else if (!Sim.routingOn(dev)) { state.className = 'warn'; state.textContent = 'inaktiv – IP-Routing ist ausgeschaltet (Reiter „Routing“)'; }
       else if (Sim.ripConverging()) { state.className = 'warn'; state.textContent = `Routing-Updates werden ausgetauscht … (${Sim.RIP_INTERVAL / 1000} s je Hop)`; }
       else { state.className = 'ok-text'; state.textContent = 'konvergiert'; }
 
       q('[data-dyn=nets]').innerHTML = c.networks.length ? c.networks.map(n => {
-        const ifs = dev.ports.filter((p, i) => {
-          const ip = IP.parse(p.ip || '');
+        const ifs = Sim.l3Ifaces(dev).filter(k => {
+          const ip = IP.parse(Sim.ifaceConfig(dev, k).ip || '');
           return ip !== null && IP.classfulNet(ip) === IP.parse(n);
-        }).map(p => p.name);
+        }).map(k => Sim.ifaceName(dev, k));
         return `<tr><td><code>network ${esc(n)}</code></td><td>${ifs.length ? esc(ifs.join(', ')) : '<span class="warn">keine Schnittstelle in diesem Netz</span>'}</td>` +
           `<td><button class="btn-icon" data-del="${esc(n)}" title="Netz entfernen">✕</button></td></tr>`;
       }).join('') : '<tr><td colspan="3" class="empty">Noch keine Netze eingetragen.</td></tr>';
@@ -723,15 +818,220 @@ function ripPane(dev) {
       const edges = c.enabled ? Sim.ripData().edges.filter(e => e.to === dev) : [];
       q('[data-dyn=nbrs]').innerHTML = edges.length
         ? `<table class="tbl"><thead><tr><th>Nachbar</th><th>Router</th><th>Über Schnittstelle</th></tr></thead><tbody>${edges.map(e =>
-          `<tr><td>${IP.str(e.nh)}</td><td>${esc(e.from.name)}</td><td>${esc(dev.ports[e.toPort].name)}</td></tr>`).join('')}</tbody></table>`
+          `<tr><td>${IP.str(e.nh)}</td><td>${esc(e.from.name)}</td><td>${esc(Sim.ifaceName(dev, e.toPort))}</td></tr>`).join('')}</tbody></table>`
         : `<span class="meta">${c.enabled ? 'Keine RIP-Nachbarn erreichbar (Nachbar-Router brauchen ebenfalls RIP mit passendem network-Eintrag).' : '–'}</span>`;
 
       const rows = Sim.ripTable(dev).sort((a, b) => (a.net - b.net) || (IP.prefixLen(a.mask) - IP.prefixLen(b.mask))).map(e => {
         const inst = !Sim.ripSuperseded(dev, e.net, e.mask);
-        return `<tr><td>${IP.cidr(e.net, e.mask)}</td><td>${e.metric}</td><td>${IP.str(e.nextHop)}</td><td>${esc(dev.ports[e.port].name)}</td>` +
+        return `<tr><td>${IP.cidr(e.net, e.mask)}</td><td>${e.metric}</td><td>${IP.str(e.nextHop)}</td><td>${esc(Sim.ifaceName(dev, e.port))}</td>` +
           `<td>${inst ? '<span class="ok-text">in Routingtabelle</span>' : '<span class="meta">ersetzt (direkt/statisch)</span>'}</td></tr>`;
       });
       q('[data-dyn=routes]').innerHTML = rows.join('') || '<tr><td colspan="5" class="empty">Keine gelernten Routen.</td></tr>';
+    },
+  };
+}
+
+function routerDhcpPane(dev) {
+  const c = dev.dhcpd;
+  const el = makePane(`
+    <fieldset class="box">
+      <legend>DHCP-Server</legend>
+      <div class="row"><label>Dienst</label><label class="chk"><input type="checkbox" data-f="enabled"> aktiviert</label></div>
+      <p class="meta">Der Router vergibt Adressen an Clients, deren Anfrage an einer Router-Schnittstelle (auch
+        Subinterface) ankommt, die im Subnetz eines Pools liegt – z.&nbsp;B. ein Pool je VLAN bei „Router on a Stick“.</p>
+    </fieldset>
+    <div data-dyn="pools"></div>
+    <button class="btn" data-act="add-pool" style="align-self:flex-start">+ Pool hinzufügen</button>
+    <fieldset class="box">
+      <legend>Vergebene Adressen</legend>
+      <div data-dyn="leases"></div>
+    </fieldset>`);
+  const q = s => el.querySelector(s);
+  const en = q('[data-f=enabled]');
+  en.addEventListener('change', () => { c.enabled = en.checked; commit(); });
+  q('[data-act=add-pool]').addEventListener('click', () => {
+    // Vorschlag: Pool für das erste Subnetz einer Schnittstelle, das noch keinen Pool hat
+    let start = '', mask = '255.255.255.0', gw = '';
+    for (const k of Sim.l3Ifaces(dev)) {
+      const f = Sim.portIp(dev, k);
+      if (!f || c.pools.some(p => IP.parse(p.start) !== null && IP.sameNet(f.ip, IP.parse(p.start), f.mask))) continue;
+      const net = IP.network(f.ip, f.mask);
+      start = IP.str((net + Math.min(100, Math.max(1, IP.broadcast(f.ip, f.mask) - net - 51))) >>> 0);
+      mask = IP.str(f.mask);
+      gw = IP.str(f.ip);
+      break;
+    }
+    let n = c.pools.length + 1;
+    while (c.pools.some(p => p.name === 'POOL' + n)) n++;
+    c.pools.push({ name: 'POOL' + n, gateway: gw, start, mask, max: 50, leases: {} });
+    commit();
+  });
+
+  let sig = null, binds = [];
+  const render = () => {
+    binds = [];
+    const box = q('[data-dyn=pools]');
+    box.innerHTML = c.pools.map((p, i) => `
+      <fieldset class="box">
+        <legend>Pool ${esc(p.name)}</legend>
+        <div class="row"><label>Name</label><div class="inline">
+          <input type="text" data-pname="${i}" maxlength="24" spellcheck="false">
+          <button class="btn-icon" data-pdel="${i}" title="Pool löschen">✕</button></div></div>
+        <div class="row"><label>Standardgateway</label><input type="text" data-pgw="${i}" spellcheck="false" placeholder="z. B. 192.168.10.1"></div>
+        <div class="row"><label>Start-IP-Adresse</label><input type="text" data-pstart="${i}" spellcheck="false"></div>
+        <div class="row"><label>Subnetzmaske</label><input type="text" data-pmask="${i}" spellcheck="false"></div>
+        <div class="row"><label>Max. Anzahl Clients</label><input type="number" min="1" max="1000" data-pmax="${i}"></div>
+        <div class="warn" data-pw="${i}"></div>
+      </fieldset>`).join('') || '<p class="meta">Noch kein Pool angelegt.</p>';
+    c.pools.forEach((p, i) => {
+      const nm = box.querySelector(`[data-pname="${i}"]`);
+      nm.value = p.name;
+      nm.addEventListener('change', () => {
+        const v = nm.value.trim().replace(/\s+/g, '_');
+        if (v && !c.pools.some(x => x !== p && x.name === v)) p.name = v;
+        nm.value = p.name;
+        commit();
+      });
+      box.querySelector(`[data-pdel="${i}"]`).addEventListener('click', () => { c.pools.splice(i, 1); commit(); });
+      binds.push(bindIpInput(box.querySelector(`[data-pgw="${i}"]`), 'ip', () => p.gateway, v => { p.gateway = v; }));
+      binds.push(bindIpInput(box.querySelector(`[data-pstart="${i}"]`), 'ip', () => p.start, v => { p.start = v; autoMask(p, v); }));
+      binds.push(bindIpInput(box.querySelector(`[data-pmask="${i}"]`), 'mask', () => p.mask, v => { p.mask = v; }));
+      const mx = box.querySelector(`[data-pmax="${i}"]`);
+      mx.addEventListener('change', () => { p.max = clamp(parseInt(mx.value, 10) || 1, 1, 1000); mx.value = p.max; commit(); });
+    });
+  };
+
+  return {
+    el,
+    update() {
+      en.checked = c.enabled;
+      const s = c.pools.map(p => p.name).join('|');
+      if (s !== sig) { sig = s; render(); }
+      binds.forEach(b => b.refresh());
+      c.pools.forEach((p, i) => {
+        const mx = q(`[data-pmax="${i}"]`);
+        if (document.activeElement !== mx) mx.value = p.max;
+        const w = [];
+        const st = IP.parse(p.start), mk = IP.parseMask(p.mask), gw = IP.parse(p.gateway);
+        if (!Sim.poolValid(p)) w.push('Pool unvollständig: Start-IP, Subnetzmaske und Anzahl angeben.');
+        else {
+          if (gw !== null && !IP.sameNet(st, gw, mk)) w.push('Gateway liegt nicht im Subnetz des Pools.');
+          const ifs = Sim.l3Ifaces(dev).filter(k => { const f = Sim.portIp(dev, k); return f && IP.sameNet(f.ip, st, mk); });
+          if (!ifs.length) w.push('Keine Router-Schnittstelle liegt in diesem Subnetz – der Pool wird nicht verwendet.');
+        }
+        q(`[data-pw="${i}"]`).innerHTML = warnHtml(w);
+      });
+      const rows = Model.devices
+        .filter(d => Sim.isHost(d) && d.ip.mode === 'dhcp' && d.lease && d.lease.server === dev.id && !d.lease.apipa && !d.lease.released)
+        .map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.lease.ip)}</td><td>${esc(d.lease.pool || '')}</td><td>${esc(Sim.mac(d))}</td></tr>`);
+      q('[data-dyn=leases]').innerHTML = rows.length
+        ? `<table class="tbl"><thead><tr><th>Client</th><th>IP-Adresse</th><th>Pool</th><th>MAC-Adresse</th></tr></thead><tbody>${rows.join('')}</tbody></table>`
+        : '<span class="meta">Noch keine Adressen vergeben.</span>';
+    },
+  };
+}
+
+/* ================= L3-Switch ================= */
+
+function l3IfacePane(dev) {
+  const el = makePane(`
+    <div data-dyn="iprstate"></div>
+    <fieldset class="box">
+      <legend>VLAN-Schnittstellen (SVI)</legend>
+      <table class="tbl">
+        <thead><tr><th>Schnittstelle</th><th>Status</th><th>IPv4-Adresse</th><th>Subnetzmaske</th><th>aktiv</th><th style="width:36px"></th></tr></thead>
+        <tbody data-dyn="svis"></tbody>
+      </table>
+      <div class="add-row"><select data-new="vlan"></select><button class="btn" data-act="add-svi">SVI anlegen</button></div>
+      <div class="warn" data-dyn="sviwarn"></div>
+      <p class="meta">Eine SVI (<code>interface Vlan…</code>) ist das Standardgateway der Geräte im VLAN. Sie ist nur „up“,
+        wenn das VLAN existiert und mindestens ein Port dieses VLANs aktiv ist.</p>
+    </fieldset>
+    <fieldset class="box">
+      <legend>Geroutete Ports (no switchport)</legend>
+      <table class="tbl">
+        <thead><tr><th>Port</th><th>Verbunden mit</th><th>IPv4-Adresse</th><th>Subnetzmaske</th></tr></thead>
+        <tbody data-dyn="routed"></tbody>
+      </table>
+      <div class="warn" data-dyn="routedwarn"></div>
+    </fieldset>`);
+  const q = s => el.querySelector(s);
+  const vsel = q('[data-new=vlan]');
+
+  q('[data-act=add-svi]').addEventListener('click', () => {
+    const v = Number(vsel.value);
+    if (!v || dev.svis.some(s => s.vlan === v)) return;
+    dev.svis.push({ vlan: v, ip: '', mask: '', up: true });
+    dev.svis.sort((a, b) => a.vlan - b.vlan);
+    commit();
+  });
+
+  let sig = null, binds = [];
+  const routedIdx = () => dev.ports.map((p, i) => (p.mode === 'routed' ? i : null)).filter(i => i !== null);
+
+  const render = () => {
+    binds = [];
+    const sv = q('[data-dyn=svis]');
+    sv.innerHTML = dev.svis.length ? dev.svis.map(s => `<tr>
+        <td><b>Vlan${s.vlan}</b></td><td data-st="${s.vlan}"></td>
+        <td><input type="text" data-sip="${s.vlan}" spellcheck="false" placeholder="z. B. 192.168.${s.vlan % 256}.1"></td>
+        <td><input type="text" data-smask="${s.vlan}" spellcheck="false" placeholder="/24"></td>
+        <td><input type="checkbox" data-sup="${s.vlan}" title="no shutdown"></td>
+        <td><button class="btn-icon" data-sdel="${s.vlan}" title="SVI löschen">✕</button></td></tr>`).join('')
+      : '<tr><td colspan="6" class="empty">Noch keine SVI angelegt.</td></tr>';
+    for (const s of dev.svis) {
+      binds.push(bindIpInput(sv.querySelector(`[data-sip="${s.vlan}"]`), 'ip', () => s.ip, v => { s.ip = v; autoMask(s, v); }));
+      binds.push(bindIpInput(sv.querySelector(`[data-smask="${s.vlan}"]`), 'mask', () => s.mask, v => { s.mask = v; }));
+      sv.querySelector(`[data-sup="${s.vlan}"]`).addEventListener('change', e => { s.up = e.target.checked; commit(); });
+      sv.querySelector(`[data-sdel="${s.vlan}"]`).addEventListener('click', () => {
+        dev.svis = dev.svis.filter(x => x !== s);
+        dev.rip.passive = dev.rip.passive.filter(k => k !== 'v' + s.vlan);
+        commit();
+      });
+    }
+    const free = dev.vlans.filter(v => !dev.svis.some(s => s.vlan === v.id));
+    vsel.innerHTML = free.map(v => `<option value="${v.id}">VLAN ${v.id} – ${esc(v.name)}</option>`).join('')
+      || '<option value="">alle VLANs haben bereits eine SVI</option>';
+    q('[data-act=add-svi]').disabled = !free.length;
+
+    const rp = q('[data-dyn=routed]');
+    const idx = routedIdx();
+    rp.innerHTML = idx.length ? idx.map(i => `<tr>
+        <td><b>${esc(dev.ports[i].name)}</b></td><td data-peer="${i}"></td>
+        <td><input type="text" data-rip="${i}" spellcheck="false" placeholder="z. B. 10.0.0.1"></td>
+        <td><input type="text" data-rmask="${i}" spellcheck="false" placeholder="/30"></td></tr>`).join('')
+      : '<tr><td colspan="4" class="empty">Keine gerouteten Ports – im Reiter „Ports“ einen Port auf „Routed“ stellen.</td></tr>';
+    for (const i of idx) {
+      const p = dev.ports[i];
+      binds.push(bindIpInput(rp.querySelector(`[data-rip="${i}"]`), 'ip', () => p.ip, v => { p.ip = v; autoMask(p, v); }));
+      binds.push(bindIpInput(rp.querySelector(`[data-rmask="${i}"]`), 'mask', () => p.mask, v => { p.mask = v; }));
+    }
+  };
+
+  const warnFor = keys => warnHtml(keys.flatMap(k => Sim.ifaceWarnings(dev, k).map(w => `${Sim.ifaceName(dev, k)}: ${w}`)));
+
+  return {
+    el,
+    update() {
+      q('[data-dyn=iprstate]').innerHTML = dev.ipRouting
+        ? '<div class="note">IP-Routing ist eingeschaltet – der Switch routet zwischen SVIs und gerouteten Ports.</div>'
+        : warnHtml(['IP-Routing ist ausgeschaltet (Schalter im Reiter „Routing“) – die SVIs sind erreichbar, es wird aber nicht zwischen den VLANs geroutet.']);
+      const s = dev.svis.map(x => x.vlan).join(',') + '|' + routedIdx().join(',') + '|' + vlanSig(dev);
+      if (s !== sig) { sig = s; render(); }
+      binds.forEach(b => b.refresh());
+      for (const sv of dev.svis) {
+        const k = 'v' + sv.vlan;
+        const td = q(`[data-st="${sv.vlan}"]`);
+        const up = Sim.sviLineUp(dev, k);
+        td.innerHTML = up ? '<span class="ok-text">up</span>'
+          : !sv.up ? '<span class="meta">shutdown</span>'
+          : !dev.vlans.some(v => v.id === sv.vlan) ? '<span class="warn">down – VLAN fehlt</span>'
+          : '<span class="warn">down – kein aktiver Port im VLAN</span>';
+        q(`[data-sup="${sv.vlan}"]`).checked = sv.up;
+      }
+      for (const i of routedIdx()) q(`[data-peer="${i}"]`).textContent = peerText(dev, i);
+      q('[data-dyn=sviwarn]').innerHTML = warnFor(dev.svis.map(x => 'v' + x.vlan));
+      q('[data-dyn=routedwarn]').innerHTML = warnFor(routedIdx());
     },
   };
 }
@@ -741,5 +1041,8 @@ const PANELS = {
   pc: [['config', 'Konfiguration', hostConfigPane], ['terminal', 'Terminal', terminalPane]],
   server: [['config', 'Konfiguration', hostConfigPane], ['services', 'Dienste (DHCP)', dhcpServicePane], ['terminal', 'Terminal', terminalPane]],
   switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['stp', 'Spanning Tree', stpPane]],
-  router: [['ifaces', 'Schnittstellen', routerIfacePane], ['routing', 'Routing', routingPane], ['rip', 'RIP', ripPane], ['terminal', 'CLI', terminalPane]],
+  l3switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['l3', 'SVI / L3', l3IfacePane],
+    ['stp', 'Spanning Tree', stpPane], ['routing', 'Routing', routingPane], ['rip', 'RIP', ripPane], ['terminal', 'CLI', terminalPane]],
+  router: [['ifaces', 'Schnittstellen', routerIfacePane], ['routing', 'Routing', routingPane], ['rip', 'RIP', ripPane],
+    ['dhcp', 'DHCP', routerDhcpPane], ['terminal', 'CLI', terminalPane]],
 };
