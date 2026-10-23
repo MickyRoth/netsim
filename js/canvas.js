@@ -532,7 +532,7 @@ const Canvas = {
       g.innerHTML = `<rect x="-10" y="-7" width="20" height="14" rx="2" fill="${color}" stroke="#1f2933" stroke-width="1.2"/>` +
         `<path d="M-10 -7L0 1L10 -7" fill="none" stroke="#1f2933" stroke-width="1.2"/>`;
       this.gOver.appendChild(g);
-      const per = 320;
+      const per = 640; // ms je Kabelstück
       let i = 0, t0 = null;
       const step = ts => {
         if (t0 === null) t0 = ts;
