@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NetSim – Netzwerksimulation</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d3557'/%3E%3Cpath d='M16 8v8M8 24v-8h16v8' fill='none' stroke='%2393c5fd' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='7' r='3' fill='%23fff'/%3E%3Ccircle cx='8' cy='25' r='3' fill='%23fff'/%3E%3Ccircle cx='24' cy='25' r='3' fill='%23fff'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/netsim.css?v=9">
+<link rel="stylesheet" href="css/netsim.css?v=10.1">
 </head>
 <body>
 
@@ -94,14 +94,14 @@
       <li><b>Gerät hinzufügen:</b> aus der linken Leiste auf die Arbeitsfläche ziehen (oder einfach anklicken).</li>
       <li><b>Verkabeln:</b> mit gedrückter Maustaste von einem Anschluss (kleines Quadrat) zu einem freien Anschluss eines anderen Geräts ziehen. Grün = verbunden, rot = Port deaktiviert.</li>
       <li><b>Konfigurieren:</b> Doppelklick auf ein Gerät (oder Rechtsklick → Konfigurieren).</li>
-      <li><b>PC / Server:</b> IP-Adresse, Subnetzmaske, Gateway oder DHCP. Ein Server kann zusätzlich als DHCP-Server dienen (Reiter „Dienste“).</li>
+      <li><b>PC / Server:</b> IP-Adresse, Subnetzmaske, Gateway, DNS-Server oder DHCP. Ein Server kann zusätzlich DHCP-Server (Reiter „DHCP“) und DNS-Server (Reiter „DNS“: Namen und IP-Adressen eintragen) sein.</li>
       <li><b>Switch:</b> VLANs anlegen und den Ports zuordnen (Access) oder Ports als Trunk zwischen Switches betreiben.</li>
       <li><b>Switch (L3):</b> alles wie beim L2-Switch, dazu VLAN-Schnittstellen (SVI) als Gateway je VLAN, geroutete Ports (<i>no switchport</i>), „ip routing“ (Schalter im Reiter „Routing“, wie bei Cisco standardmäßig aus), statische Routen, RIPv2 und eine CLI.</li>
       <li><b>Spanning Tree:</b> auf jedem Switch standardmäßig aktiv (PVST+, eine Instanz je VLAN). Redundante Verbindungen werden blockiert (orange). Nach einer Änderung sind neu weiterleitende Ports 5&nbsp;s lang im Zustand Listening/Learning (rot). Im Reiter „Spanning Tree“ lassen sich STP abschalten, die Bridge-Priorität ändern und Root-Bridge, Port-Rollen und Status ablesen. Eine Schleife ohne STP führt zu einem Broadcast-Sturm.</li>
       <li><b>Router:</b> 3 Schnittstellen mit IP/Maske, statische Routen z.&nbsp;B. <code>192.168.1.0/24 via 192.168.2.254</code>.
         Subinterfaces (802.1Q) für „Router on a Stick“ im Reiter „Schnittstellen“; DHCP-Server mit mehreren Pools im Reiter „DHCP“.</li>
       <li><b>RIPv2:</b> im Router-Reiter „RIP“ aktivieren und Netze klassenbasiert eintragen (z.&nbsp;B. <code>192.168.1.0</code>, <code>10.0.0.0</code>). Gelernte Routen erscheinen als „R“ in der Routingtabelle – 5&nbsp;s je Hop.</li>
-      <li><b>Testen:</b> im Terminal eines PCs/Servers <code>ping 192.168.1.1</code>, <code>tracert 10.0.0.10</code>, <code>ipconfig</code>; in der Router-CLI <code>ping</code>, <code>show ip route</code>, <code>show ip interface brief</code>.</li>
+      <li><b>Testen:</b> im Terminal eines PCs/Servers <code>ping 192.168.1.1</code>, <code>tracert 10.0.0.10</code>, <code>ipconfig /all</code>, <code>nslookup www.netsim.lan</code> – überall sind statt IP-Adressen auch Namen möglich, wenn ein DNS-Server eingetragen ist; in der Router-CLI <code>ping</code>, <code>show ip route</code>, <code>show ip interface brief</code>.</li>
       <li><b>Text:</b> Werkzeug „Text“ aus der Leiste einfügen; danach Farbe, Schriftgröße und Normal/Fett/Kursiv wählen. Doppelklick auf einen Text öffnet den Editor erneut, Strg+Enter schließt ihn.</li>
       <li><b>Ansicht:</b> leere Fläche ziehen = verschieben, Mausrad = zoomen.</li>
     </ul>
@@ -118,15 +118,15 @@
 
 <input type="file" id="file-input" accept=".netsim,.json,application/json" hidden>
 
-<script src="js/util.js?v=9"></script>
-<script src="js/model.js?v=9"></script>
-<script src="js/icons.js?v=9"></script>
-<script src="js/sim.js?v=9"></script>
-<script src="js/rip.js?v=9"></script>
-<script src="js/canvas.js?v=9"></script>
-<script src="js/notes.js?v=9"></script>
-<script src="js/terminal.js?v=9"></script>
-<script src="js/windows.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/util.js?v=10.1"></script>
+<script src="js/model.js?v=10.1"></script>
+<script src="js/icons.js?v=10.1"></script>
+<script src="js/sim.js?v=10.1"></script>
+<script src="js/rip.js?v=10.1"></script>
+<script src="js/canvas.js?v=10.1"></script>
+<script src="js/notes.js?v=10.1"></script>
+<script src="js/terminal.js?v=10.1"></script>
+<script src="js/windows.js?v=10.1"></script>
+<script src="js/app.js?v=10.1"></script>
 </body>
 </html>

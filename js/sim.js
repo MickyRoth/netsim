@@ -673,7 +673,10 @@ const Sim = {
     }
     for (const id of Object.keys(c.leases)) if (!Model.get(id)) delete c.leases[id];
     c.leases[d.id] = IP.str(ip);
-    d.lease = { ip: IP.str(ip), mask: IP.str(mask), gateway: IP.valid(c.gateway) ? c.gateway : '', server: srv.id };
+    d.lease = {
+      ip: IP.str(ip), mask: IP.str(mask), gateway: IP.valid(c.gateway) ? c.gateway : '',
+      dns: IP.valid(c.dns || '') ? c.dns : '', server: srv.id,
+    };
     if (srv.type === 'router') d.lease.pool = c.name;
     return { ok: true, server: srv };
   },
@@ -694,6 +697,48 @@ const Sim = {
     for (const d of Model.devices) {
       if (this.isHost(d) && d.ip.mode === 'dhcp' && (!d.lease || d.lease.apipa)) this.dhcpRequest(d);
     }
+  },
+
+  /* ---------------- DNS ---------------- */
+
+  /** Gültiger Hostname (z. B. www.schule.de)? */
+  validHostname(n) {
+    return /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i.test(String(n));
+  },
+
+  /** Eingetragener DNS-Server eines Geräts (Host: statisch oder per DHCP; Router/L3-Switch: ip name-server). */
+  dnsServerOf(d) {
+    let s = '';
+    if (this.isHost(d)) s = d.ip.mode === 'dhcp' ? (d.lease && d.lease.dns) || '' : d.ip.dns || '';
+    else if (this.isRouterLike(d)) s = d.dns || '';
+    return IP.parse(s);
+  },
+
+  /**
+   * DNS-Abfrage durchs Netz: Anfrage an den eingetragenen DNS-Server, Antwort zurück.
+   * status: ok | nodns (kein DNS-Server eingetragen) | timeout (nicht erreichbar / Dienst aus) | nxdomain
+   */
+  async dnsQuery(src, name, animate) {
+    const dns = this.dnsServerOf(src);
+    if (dns === null) return { status: 'nodns' };
+    const host = String(name).toLowerCase().replace(/\.$/, '');
+    const req = this.forward(src, dns, this.startTtl(src));
+    if (animate) await Canvas.animatePacket(req.hops, '#60a5fa');
+    const srv = req.status === 'ok' ? req.dev : null;
+    const serving = srv && srv.type === 'server' && srv.dns && srv.dns.enabled;
+    if (!serving) {
+      if (animate) Canvas.flashMark(req.dev || src, false);
+      return { status: 'timeout', dns };
+    }
+    if (!req.local) {
+      const rep = this.forward(srv, req.srcIp, this.startTtl(srv));
+      if (animate) await Canvas.animatePacket(rep.hops, '#60a5fa');
+      if (rep.status !== 'ok' || rep.dev !== src) return { status: 'timeout', dns };
+    }
+    const rec = IP.valid(host)
+      ? srv.dns.records.find(r => r.ip === IP.str(IP.parse(host)))
+      : srv.dns.records.find(r => r.name === host);
+    return rec ? { status: 'ok', ip: IP.parse(rec.ip), dns, name: rec.name } : { status: 'nxdomain', dns, name: host };
   },
 
   /* ---------------- Hilfen für die Oberfläche ---------------- */

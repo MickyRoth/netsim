@@ -204,6 +204,7 @@ function hostConfigPane(dev) {
       <div class="row"><label>IPv4-Adresse</label><input type="text" data-f="ip" placeholder="z. B. 192.168.1.10" spellcheck="false"></div>
       <div class="row"><label>Subnetzmaske</label><input type="text" data-f="mask" placeholder="255.255.255.0 oder /24" spellcheck="false"></div>
       <div class="row"><label>Standardgateway</label><input type="text" data-f="gateway" placeholder="z. B. 192.168.1.1" spellcheck="false"></div>
+      <div class="row"><label>DNS-Server</label><input type="text" data-f="dns" placeholder="z. B. 192.168.1.2" spellcheck="false"></div>
       <div class="note" data-dyn="dhcp"></div>
     </fieldset>
     <div class="warn" data-dyn="warn"></div>
@@ -212,11 +213,12 @@ function hostConfigPane(dev) {
   const name = nameRow(dev);
   el.prepend(name.row);
   const q = s => el.querySelector(s);
-  const f = { ip: q('[data-f=ip]'), mask: q('[data-f=mask]'), gateway: q('[data-f=gateway]') };
+  const f = { ip: q('[data-f=ip]'), mask: q('[data-f=mask]'), gateway: q('[data-f=gateway]'), dns: q('[data-f=dns]') };
   const binds = [
     bindIpInput(f.ip, 'ip', () => dev.ip.ip, v => { dev.ip.ip = v; autoMask(dev.ip, v); }),
     bindIpInput(f.mask, 'mask', () => dev.ip.mask, v => { dev.ip.mask = v; }),
     bindIpInput(f.gateway, 'ip', () => dev.ip.gateway, v => { dev.ip.gateway = v; }),
+    bindIpInput(f.dns, 'ip', () => dev.ip.dns, v => { dev.ip.dns = v; }),
   ];
   el.querySelectorAll(`input[name="${rn}"]`).forEach(r => r.addEventListener('change', () => {
     dev.ip.mode = r.value;
@@ -259,6 +261,7 @@ function dhcpServicePane(dev) {
       <legend>DHCP-Server</legend>
       <div class="row"><label>Dienst</label><label class="chk"><input type="checkbox" data-f="enabled"> aktiviert</label></div>
       <div class="row"><label>Standardgateway</label><input type="text" data-f="gateway" placeholder="z. B. 192.168.1.1" spellcheck="false"></div>
+      <div class="row"><label>DNS-Server</label><input type="text" data-f="dns" placeholder="z. B. 192.168.1.2" spellcheck="false"></div>
       <div class="row"><label>Start-IP-Adresse</label><input type="text" data-f="start" spellcheck="false"></div>
       <div class="row"><label>Subnetzmaske</label><input type="text" data-f="mask" spellcheck="false"></div>
       <div class="row"><label>Max. Anzahl Clients</label><input type="number" min="1" max="1000" data-f="max"></div>
@@ -276,6 +279,7 @@ function dhcpServicePane(dev) {
   max.addEventListener('change', () => { c.max = clamp(parseInt(max.value, 10) || 1, 1, 1000); max.value = c.max; commit(); });
   const binds = [
     bindIpInput(q('[data-f=gateway]'), 'ip', () => c.gateway, v => { c.gateway = v; }),
+    bindIpInput(q('[data-f=dns]'), 'ip', () => c.dns, v => { c.dns = v; }),
     bindIpInput(q('[data-f=start]'), 'ip', () => c.start, v => { c.start = v; autoMask(c, v); }),
     bindIpInput(q('[data-f=mask]'), 'mask', () => c.mask, v => { c.mask = v; }),
   ];
@@ -310,6 +314,82 @@ function terminalPane(dev) {
   return {
     el,
     onShow() { setTimeout(() => { term.focus(); term.scroll(); }, 0); },
+  };
+}
+
+/** DNS-Server-Eintrag (ip name-server) für Router und L3-Switch. */
+function dnsRow(dev) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<label>DNS-Server</label><input type="text" spellcheck="false" placeholder="ip name-server, z. B. 192.168.1.2">';
+  const b = bindIpInput(row.querySelector('input'), 'ip', () => dev.dns, v => { dev.dns = v; });
+  return { row, update() { b.refresh(); } };
+}
+
+function dnsServicePane(dev) {
+  const c = dev.dns;
+  const el = makePane(`
+    <fieldset class="box">
+      <legend>DNS-Server</legend>
+      <div class="row"><label>Dienst</label><label class="chk"><input type="checkbox" data-f="enabled"> aktiviert</label></div>
+      <div class="row"><label>Adresse dieses Servers</label><span data-dyn="addr"></span></div>
+      <p class="meta">Clients, die diesen Server als DNS-Server eingetragen haben (statisch oder per DHCP), können Namen
+        statt IP-Adressen verwenden, z.&nbsp;B. <code>ping www.schule.lan</code> oder <code>nslookup www.schule.lan</code>.</p>
+    </fieldset>
+    <fieldset class="box">
+      <legend>Einträge (A-Records)</legend>
+      <table class="tbl">
+        <thead><tr><th>Name</th><th>IP-Adresse</th><th style="width:36px"></th></tr></thead>
+        <tbody data-dyn="records"></tbody>
+      </table>
+      <div class="add-row">
+        <input type="text" data-new="name" placeholder="Name, z. B. www.schule.lan" spellcheck="false">
+        <input type="text" data-new="ip" placeholder="IP-Adresse" spellcheck="false" style="flex:0 0 150px">
+        <button class="btn" data-act="add">Hinzufügen</button>
+      </div>
+      <div class="err" data-dyn="err"></div>
+    </fieldset>
+    <div class="warn" data-dyn="warn"></div>`);
+  const q = s => el.querySelector(s);
+  const en = q('[data-f=enabled]'), err = q('[data-dyn=err]');
+  const nIn = q('[data-new=name]'), iIn = q('[data-new=ip]');
+  en.addEventListener('change', () => { c.enabled = en.checked; commit(); });
+  const add = () => {
+    err.textContent = '';
+    const name = nIn.value.trim().toLowerCase().replace(/\.$/, '');
+    const ip = iIn.value.trim();
+    if (!Sim.validHostname(name) || IP.valid(name)) { err.textContent = 'Ungültiger Name – erlaubt sind Buchstaben, Ziffern, Bindestrich und Punkt (z. B. www.schule.lan).'; return; }
+    if (!IP.valid(ip)) { err.textContent = 'Bitte eine gültige IPv4-Adresse eingeben.'; return; }
+    const ex = c.records.find(r => r.name === name);
+    if (ex) ex.ip = IP.str(IP.parse(ip)); else c.records.push({ name, ip: IP.str(IP.parse(ip)) });
+    c.records.sort((a, b) => a.name.localeCompare(b.name));
+    nIn.value = ''; iIn.value = '';
+    commit();
+    nIn.focus();
+  };
+  q('[data-act=add]').addEventListener('click', add);
+  [nIn, iIn].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') add(); }));
+  q('[data-dyn=records]').addEventListener('click', e => {
+    const b = e.target.closest('[data-del]');
+    if (!b) return;
+    c.records = c.records.filter(r => r.name !== b.dataset.del);
+    commit();
+  });
+  return {
+    el,
+    update() {
+      en.checked = c.enabled;
+      const f = Sim.hostIface(dev);
+      q('[data-dyn=addr]').innerHTML = f ? `<code>${IP.str(f.ip)}</code>` : '<span class="warn">keine IP-Adresse</span>';
+      q('[data-dyn=records]').innerHTML = c.records.length ? c.records.map(r =>
+        `<tr><td><code>${esc(r.name)}</code></td><td>${esc(r.ip)}</td>` +
+        `<td><button class="btn-icon" data-del="${esc(r.name)}" title="Eintrag löschen">✕</button></td></tr>`).join('')
+        : '<tr><td colspan="3" class="empty">Noch keine Einträge.</td></tr>';
+      const w = [];
+      if (c.enabled && !f) w.push('Der Server hat noch keine IP-Adresse – Clients können ihn nicht erreichen.');
+      if (c.enabled && !c.records.length) w.push('Noch keine Einträge – Anfragen werden mit „Name nicht gefunden“ beantwortet.');
+      q('[data-dyn=warn]').innerHTML = warnHtml(w);
+    },
   };
 }
 
@@ -538,7 +618,8 @@ function routerIfacePane(dev) {
       </details>
     </fieldset>`).join(''));
   const name = nameRow(dev);
-  el.prepend(name.row);
+  const dnsR = dnsRow(dev);
+  el.prepend(name.row, dnsR.row);
   const binds = [];
   dev.ports.forEach((p, i) => {
     binds.push(bindIpInput(el.querySelector(`[data-ip="${i}"]`), 'ip', () => p.ip, v => { p.ip = v; autoMask(p, v); }));
@@ -593,6 +674,7 @@ function routerIfacePane(dev) {
     el,
     update() {
       name.update();
+      dnsR.update();
       const sig = dev.subifs.map(s => s.port + '.' + s.vlan).join(',');
       if (sig !== subSig) { subSig = sig; renderSubs(); }
       binds.forEach(b => b.refresh());
@@ -863,7 +945,7 @@ function routerDhcpPane(dev) {
     }
     let n = c.pools.length + 1;
     while (c.pools.some(p => p.name === 'POOL' + n)) n++;
-    c.pools.push({ name: 'POOL' + n, gateway: gw, start, mask, max: 50, leases: {} });
+    c.pools.push({ name: 'POOL' + n, gateway: gw, dns: dev.dns || '', start, mask, max: 50, leases: {} });
     commit();
   });
 
@@ -878,6 +960,7 @@ function routerDhcpPane(dev) {
           <input type="text" data-pname="${i}" maxlength="24" spellcheck="false">
           <button class="btn-icon" data-pdel="${i}" title="Pool löschen">✕</button></div></div>
         <div class="row"><label>Standardgateway</label><input type="text" data-pgw="${i}" spellcheck="false" placeholder="z. B. 192.168.10.1"></div>
+        <div class="row"><label>DNS-Server</label><input type="text" data-pdns="${i}" spellcheck="false" placeholder="z. B. 192.168.1.2"></div>
         <div class="row"><label>Start-IP-Adresse</label><input type="text" data-pstart="${i}" spellcheck="false"></div>
         <div class="row"><label>Subnetzmaske</label><input type="text" data-pmask="${i}" spellcheck="false"></div>
         <div class="row"><label>Max. Anzahl Clients</label><input type="number" min="1" max="1000" data-pmax="${i}"></div>
@@ -894,6 +977,7 @@ function routerDhcpPane(dev) {
       });
       box.querySelector(`[data-pdel="${i}"]`).addEventListener('click', () => { c.pools.splice(i, 1); commit(); });
       binds.push(bindIpInput(box.querySelector(`[data-pgw="${i}"]`), 'ip', () => p.gateway, v => { p.gateway = v; }));
+      binds.push(bindIpInput(box.querySelector(`[data-pdns="${i}"]`), 'ip', () => p.dns, v => { p.dns = v; }));
       binds.push(bindIpInput(box.querySelector(`[data-pstart="${i}"]`), 'ip', () => p.start, v => { p.start = v; autoMask(p, v); }));
       binds.push(bindIpInput(box.querySelector(`[data-pmask="${i}"]`), 'mask', () => p.mask, v => { p.mask = v; }));
       const mx = box.querySelector(`[data-pmax="${i}"]`);
@@ -936,6 +1020,7 @@ function routerDhcpPane(dev) {
 function l3IfacePane(dev) {
   const el = makePane(`
     <div data-dyn="iprstate"></div>
+    <div data-dyn="dnsrow"></div>
     <fieldset class="box">
       <legend>VLAN-Schnittstellen (SVI)</legend>
       <table class="tbl">
@@ -957,6 +1042,8 @@ function l3IfacePane(dev) {
     </fieldset>`);
   const q = s => el.querySelector(s);
   const vsel = q('[data-new=vlan]');
+  const dnsR = dnsRow(dev);
+  q('[data-dyn=dnsrow]').replaceWith(dnsR.row);
 
   q('[data-act=add-svi]').addEventListener('click', () => {
     const v = Number(vsel.value);
@@ -1013,6 +1100,7 @@ function l3IfacePane(dev) {
   return {
     el,
     update() {
+      dnsR.update();
       q('[data-dyn=iprstate]').innerHTML = dev.ipRouting
         ? '<div class="note">IP-Routing ist eingeschaltet – der Switch routet zwischen SVIs und gerouteten Ports.</div>'
         : warnHtml(['IP-Routing ist ausgeschaltet (Schalter im Reiter „Routing“) – die SVIs sind erreichbar, es wird aber nicht zwischen den VLANs geroutet.']);
@@ -1039,7 +1127,8 @@ function l3IfacePane(dev) {
 /* Reiter je Gerätetyp: [Schlüssel, Beschriftung, Fabrikfunktion] */
 const PANELS = {
   pc: [['config', 'Konfiguration', hostConfigPane], ['terminal', 'Terminal', terminalPane]],
-  server: [['config', 'Konfiguration', hostConfigPane], ['services', 'Dienste (DHCP)', dhcpServicePane], ['terminal', 'Terminal', terminalPane]],
+  server: [['config', 'Konfiguration', hostConfigPane], ['services', 'DHCP', dhcpServicePane], ['dns', 'DNS', dnsServicePane],
+    ['terminal', 'Terminal', terminalPane]],
   switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['stp', 'Spanning Tree', stpPane]],
   l3switch: [['ports', 'Ports', switchPortsPane], ['vlans', 'VLANs', vlanPane], ['l3', 'SVI / L3', l3IfacePane],
     ['stp', 'Spanning Tree', stpPane], ['routing', 'Routing', routingPane], ['rip', 'RIP', ripPane], ['terminal', 'CLI', terminalPane]],

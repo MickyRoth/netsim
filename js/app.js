@@ -3,7 +3,7 @@
 /* Anwendung: Werkzeugleiste, Palette, Dateien, Export, Rückgängig, Tastatur. */
 
 /** Programmversion – bei jeder Veröffentlichung erhöhen (auch ?v= in index.html). */
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 
 const PALETTE = [
   { group: 'Endgeräte', items: ['pc', 'server'] },
@@ -362,45 +362,56 @@ const App = {
     if (Model.devices.length && !confirm('Das aktuelle Netzwerk durch das Beispielnetzwerk ersetzen?\n(Rückgängig ist mit Strg+Z möglich.)')) return;
     const mk = (id, type, name, x, y) => Object.assign({ id, type, name, x, y }, Model.defaults(type));
 
-    const r0 = mk('d1', 'router', 'Router0', 380, 40);
+    const r0 = mk('d1', 'router', 'Router1', 380, 40);
     r0.ports[1].ip = '192.168.2.1'; r0.ports[1].mask = '255.255.255.0';
     r0.ports[2].ip = '192.168.1.1'; r0.ports[2].mask = '255.255.255.0';
     r0.routes.push({ network: '10.0.0.0', mask: '255.255.255.0', nextHop: '192.168.2.2' });
 
-    const r1 = mk('d2', 'router', 'Router1', 700, 40);
+    const r1 = mk('d2', 'router', 'Router2', 700, 40);
     r1.ports[0].ip = '192.168.2.2'; r1.ports[0].mask = '255.255.255.0';
     r1.ports[2].ip = '10.0.0.1'; r1.ports[2].mask = '255.255.255.0';
     r1.routes.push({ network: '192.168.1.0', mask: '255.255.255.0', nextHop: '192.168.2.1' });
 
-    const s0 = mk('d3', 'switch', 'Switch0', 230, 180);
-    const s1 = mk('d4', 'switch', 'Switch1', 640, 180);
+    const s0 = mk('d3', 'switch', 'Switch1', 230, 180);
+    const s1 = mk('d4', 'switch', 'Switch2', 640, 180);
 
-    const pc0 = mk('d5', 'pc', 'PC0', 240, 310);
-    Object.assign(pc0.ip, { ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1' });
-    const pc1 = mk('d6', 'pc', 'PC1', 340, 310);
+    const pc0 = mk('d5', 'pc', 'PC1', 240, 310);
+    Object.assign(pc0.ip, { ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1', dns: '192.168.1.2' });
+    const pc1 = mk('d6', 'pc', 'PC2', 340, 310);
     pc1.ip.mode = 'dhcp';
-    const srv = mk('d7', 'server', 'Server0', 450, 300);
-    Object.assign(srv.ip, { ip: '192.168.1.2', mask: '255.255.255.0', gateway: '192.168.1.1' });
-    Object.assign(srv.dhcp, { enabled: true, gateway: '192.168.1.1', start: '192.168.1.100', mask: '255.255.255.0', max: 50 });
+    const srv = mk('d7', 'server', 'Server1', 450, 300);
+    Object.assign(srv.ip, { ip: '192.168.1.2', mask: '255.255.255.0', gateway: '192.168.1.1', dns: '192.168.1.2' });
+    Object.assign(srv.dhcp, { enabled: true, gateway: '192.168.1.1', dns: '192.168.1.2', start: '192.168.1.100', mask: '255.255.255.0', max: 50 });
+    srv.dns = {
+      enabled: true,
+      records: [
+        { name: 'pc3.netsim.lan', ip: '10.0.0.10' },
+        { name: 'pc4.netsim.lan', ip: '10.0.0.11' },
+        { name: 'server1.netsim.lan', ip: '192.168.1.2' },
+        { name: 'www.netsim.lan', ip: '192.168.1.2' },
+      ],
+    };
+    r0.dns = '192.168.1.2';
+    r1.dns = '192.168.1.2';
 
-    const pc2 = mk('d8', 'pc', 'PC2', 680, 310);
-    Object.assign(pc2.ip, { ip: '10.0.0.10', mask: '255.255.255.0', gateway: '10.0.0.1' });
-    const pc3 = mk('d9', 'pc', 'PC3', 790, 310);
-    Object.assign(pc3.ip, { ip: '10.0.0.11', mask: '255.255.255.0', gateway: '10.0.0.1' });
+    const pc2 = mk('d8', 'pc', 'PC3', 680, 310);
+    Object.assign(pc2.ip, { ip: '10.0.0.10', mask: '255.255.255.0', gateway: '10.0.0.1', dns: '192.168.1.2' });
+    const pc3 = mk('d9', 'pc', 'PC4', 790, 310);
+    Object.assign(pc3.ip, { ip: '10.0.0.11', mask: '255.255.255.0', gateway: '10.0.0.1', dns: '192.168.1.2' });
 
     const L = (id, a, ap, b, bp) => ({ id, a: { dev: a, port: ap }, b: { dev: b, port: bp } });
     const data = {
       format: 'netsim', version: 1,
       devices: [r0, r1, s0, s1, pc0, pc1, srv, pc2, pc3],
       links: [
-        L('l10', 'd1', 1, 'd2', 0),   // Router0 Gi0/1 – Router1 Gi0/0
-        L('l11', 'd1', 2, 'd3', 7),   // Router0 Gi0/2 – Switch0 Fa0/8
-        L('l12', 'd2', 2, 'd4', 7),   // Router1 Gi0/2 – Switch1 Fa0/8
-        L('l13', 'd5', 0, 'd3', 0),   // PC0 – Switch0 Fa0/1
-        L('l14', 'd6', 0, 'd3', 1),   // PC1 – Switch0 Fa0/2
-        L('l15', 'd7', 0, 'd3', 2),   // Server0 – Switch0 Fa0/3
-        L('l16', 'd8', 0, 'd4', 0),   // PC2 – Switch1 Fa0/1
-        L('l17', 'd9', 0, 'd4', 1),   // PC3 – Switch1 Fa0/2
+        L('l10', 'd1', 1, 'd2', 0),   // Router1 Gi0/1 – Router2 Gi0/0
+        L('l11', 'd1', 2, 'd3', 7),   // Router1 Gi0/2 – Switch1 Fa0/8
+        L('l12', 'd2', 2, 'd4', 7),   // Router2 Gi0/2 – Switch2 Fa0/8
+        L('l13', 'd5', 0, 'd3', 0),   // PC1 – Switch1 Fa0/1
+        L('l14', 'd6', 0, 'd3', 1),   // PC2 – Switch1 Fa0/2
+        L('l15', 'd7', 0, 'd3', 2),   // Server1 – Switch1 Fa0/3
+        L('l16', 'd8', 0, 'd4', 0),   // PC3 – Switch2 Fa0/1
+        L('l17', 'd9', 0, 'd4', 1),   // PC4 – Switch2 Fa0/2
       ],
     };
     for (const id of [...Win.wins.keys()]) Win.close(id);
@@ -410,7 +421,7 @@ const App = {
     this.setFileName('Beispiel');
     Canvas.select(null);
     Canvas.fit();
-    this.toast('Beispiel geladen: Doppelklick auf PC0 → Terminal → „ping 10.0.0.10“');
+    this.toast('Beispiel geladen: Doppelklick auf PC1 → Terminal → „ping 10.0.0.10“ oder „ping www.netsim.lan“');
   },
 
   /* ---------------- Meldungen & Menü ---------------- */

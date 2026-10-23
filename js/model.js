@@ -52,21 +52,22 @@ const Model = {
   nextName(type) {
     const p = DEVICE_TYPES[type].prefix;
     const names = new Set(this.devices.map(d => d.name));
-    let n = 0;
+    let n = 1; // bewusst ab 1 (Cisco Packet Tracer beginnt bei 0)
     while (names.has(p + n)) n++;
     return p + n;
   },
 
   defaults(type) {
     const t = DEVICE_TYPES[type];
-    const ipCfg = () => ({ mode: 'static', ip: '', mask: '', gateway: '' });
+    const ipCfg = () => ({ mode: 'static', ip: '', mask: '', gateway: '', dns: '' });
     switch (type) {
       case 'pc':
         return { ip: ipCfg(), lease: null, ports: [{ name: 'Fa0' }] };
       case 'server':
         return {
           ip: ipCfg(), lease: null, ports: [{ name: 'Fa0' }],
-          dhcp: { enabled: false, gateway: '', start: '192.168.1.100', mask: '255.255.255.0', max: 50, leases: {} },
+          dhcp: { enabled: false, gateway: '', dns: '', start: '192.168.1.100', mask: '255.255.255.0', max: 50, leases: {} },
+          dns: { enabled: false, records: [] },  // DNS-Dienst: { name, ip }
         };
       case 'switch':
         return {
@@ -80,6 +81,7 @@ const Model = {
           vlans: [{ id: 1, name: 'default' }],
           ports: t.ports.map(p => ({ name: p.name, mode: 'access', vlan: 1, ip: '', mask: '' })),
           svis: [],          // VLAN-Schnittstellen: { vlan, ip, mask, up }
+          dns: '',           // ip name-server
           ipRouting: false,  // wie bei Cisco standardmäßig aus
           routes: [],
           rip: { enabled: false, networks: [], passive: [], defaultOriginate: false },
@@ -89,6 +91,7 @@ const Model = {
           ports: t.ports.map(p => ({ name: p.name, ip: '', mask: '', up: true })),
           subifs: [],        // Subinterfaces (802.1Q): { port, vlan, ip, mask }
           dhcpd: { enabled: false, pools: [] },  // DHCP-Server: Pools wie beim Server
+          dns: '',           // ip name-server
           routes: [],
           rip: { enabled: false, networks: [], passive: [], defaultOriginate: false },
         };
@@ -190,6 +193,13 @@ const Model = {
       }
       if (def.dhcp) {
         d.dhcp = Object.assign(def.dhcp, raw.dhcp);
+        const z = raw.dns && typeof raw.dns === 'object' ? raw.dns : {};
+        d.dns = {
+          enabled: !!z.enabled,
+          records: (Array.isArray(z.records) ? z.records : [])
+            .filter(r => r && r.name && IP.valid(String(r.ip)))
+            .map(r => ({ name: String(r.name).toLowerCase(), ip: String(r.ip) })),
+        };
         d.dhcp.leases = Object.assign({}, raw.dhcp && raw.dhcp.leases);
       }
       if (def.vlans) {
@@ -237,7 +247,7 @@ const Model = {
         d.dhcpd = {
           enabled: !!s.enabled,
           pools: (Array.isArray(s.pools) ? s.pools : []).filter(p => p && typeof p === 'object').map(p => ({
-            name: String(p.name || 'LAN'), gateway: String(p.gateway || ''), start: String(p.start || ''),
+            name: String(p.name || 'LAN'), gateway: String(p.gateway || ''), dns: String(p.dns || ''), start: String(p.start || ''),
             mask: String(p.mask || ''), max: clamp(parseInt(p.max, 10) || 50, 1, 1000),
             leases: Object.assign({}, p.leases),
           })),
@@ -251,6 +261,7 @@ const Model = {
           .sort((a, b) => a.vlan - b.vlan);
         d.ipRouting = !!raw.ipRouting;
       }
+      if (typeof def.dns === 'string') d.dns = IP.valid(String(raw.dns || '')) ? String(raw.dns) : '';
       if (def.routes) {
         d.routes = (Array.isArray(raw.routes) ? raw.routes : []).map(r => ({
           network: String(r.network || ''), mask: String(r.mask || ''), nextHop: String(r.nextHop || ''),

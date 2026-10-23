@@ -101,8 +101,10 @@ class Terminal {
       case 'help': case '?':
         this.println([
           'Verfügbare Befehle:',
-          '  ping [-n Anzahl] [-t] <IP>    Erreichbarkeit testen (Strg+C bricht ab)',
-          '  tracert <IP>                  Route zum Ziel verfolgen',
+          '  ping [-n Anzahl] [-t] <Ziel>  Erreichbarkeit testen (Strg+C bricht ab)',
+          '  tracert <Ziel>                Route zum Ziel verfolgen',
+          '  nslookup <Name>               Namen per DNS auflösen',
+          '  (Ziel = IP-Adresse oder Name, z. B. www.schule.lan)',
           '  ipconfig [/all]               IP-Konfiguration anzeigen',
           '  ipconfig /release | /renew    DHCP-Adresse freigeben / neu anfordern',
           '  hostname                      Gerätenamen anzeigen',
@@ -124,6 +126,9 @@ class Terminal {
         break;
       case 'tracert': case 'traceroute':
         await this.tracert(a[1]);
+        break;
+      case 'nslookup':
+        await this.nslookup(a[1]);
         break;
       default:
         this.println('Invalid Command.\n');
@@ -175,6 +180,10 @@ class Terminal {
     L('IPv4 Address', f ? IP.str(f.ip) : '0.0.0.0');
     L('Subnet Mask', f ? IP.str(f.mask) : '0.0.0.0');
     L('Default Gateway', f && f.gw !== null ? IP.str(f.gw) : '0.0.0.0');
+    if (opt === '/all') {
+      const dns = Sim.dnsServerOf(d);
+      L('DNS Servers', dns !== null ? IP.str(dns) : '0.0.0.0');
+    }
     this.println('');
   }
 
@@ -187,12 +196,14 @@ class Terminal {
       else target = args[i];
     }
     if (!target) { this.println('Usage: ping [-n count] [-t] target_name\n'); return; }
-    const dst = IP.parse(target);
-    if (dst === null) {
+    const res = await this.resolveTarget(target);
+    if (res.ip === undefined) {
       this.println(`Ping request could not find host ${target}. Please check the name and try again.\n`);
       return;
     }
-    this.println(`\nPinging ${target} with 32 bytes of data:\n`);
+    const dst = res.ip;
+    const ipStr = IP.str(dst);
+    this.println(`\nPinging ${res.name ? `${res.name} [${ipStr}]` : ipStr} with 32 bytes of data:\n`);
     let sent = 0, recv = 0, storm = false;
     const times = [];
     for (let i = 0; i < count && !this.abort; i++) {
@@ -202,9 +213,9 @@ class Terminal {
       if (r.status === 'ok') {
         recv++;
         times.push(r.time);
-        this.println(`Reply from ${target}: bytes=32 time${r.time === 0 ? '<1' : '=' + r.time}ms TTL=${r.ttl}`);
+        this.println(`Reply from ${ipStr}: bytes=32 time${r.time === 0 ? '<1' : '=' + r.time}ms TTL=${r.ttl}`);
       } else if (r.status === 'unreach') {
-        this.println(`Reply from ${r.from !== null ? IP.str(r.from) : target}: Destination host unreachable.`);
+        this.println(`Reply from ${r.from !== null ? IP.str(r.from) : ipStr}: Destination host unreachable.`);
       } else if (r.status === 'ttl') {
         this.println(`Reply from ${IP.str(r.from)}: TTL expired in transit.`);
       } else if (r.status === 'noip' || r.status === 'nogw') {
@@ -216,7 +227,7 @@ class Terminal {
     }
     if (this.abort) this.println('Control-C\n^C');
     const lost = sent - recv;
-    this.println(`\nPing statistics for ${target}:`);
+    this.println(`\nPing statistics for ${ipStr}:`);
     this.println(`    Packets: Sent = ${sent}, Received = ${recv}, Lost = ${lost} (${Math.round(lost / Math.max(1, sent) * 100)}% loss),`);
     if (recv) {
       const min = Math.min(...times), max = Math.max(...times);
@@ -228,11 +239,65 @@ class Terminal {
     if (storm) Terminal.stormHint();
   }
 
+  /** Ziel als IP-Adresse oder per DNS auflösen. Liefert { ip, name } oder { error }. */
+  async resolveTarget(target) {
+    const ip = IP.parse(target || '');
+    if (ip !== null) return { ip };
+    if (!Sim.validHostname(target)) return { error: 'invalid' };
+    const r = await Sim.dnsQuery(this.dev, target, Canvas.settings.animate);
+    return r.status === 'ok' ? { ip: r.ip, name: r.name, dns: r.dns } : { error: r.status, dns: r.dns };
+  }
+
+  /** Router-CLI: Namen wie bei Cisco übersetzen ("Translating ..."). */
+  async routerResolve(target) {
+    if (!target) { this.println('% Incomplete command.\n'); return null; }
+    const ip = IP.parse(target);
+    if (ip !== null) return ip;
+    if (!Sim.validHostname(target)) { this.println('% Unrecognized host or address, or protocol not running.\n'); return null; }
+    const dns = Sim.dnsServerOf(this.dev);
+    this.write(`Translating "${target}"...domain server (${dns !== null ? IP.str(dns) : '255.255.255.255'})`);
+    const r = await this.resolveTarget(target);
+    if (r.ip === undefined) {
+      this.println('\n% Unrecognized host or address, or protocol not running.\n');
+      return null;
+    }
+    this.println(' [OK]');
+    return r.ip;
+  }
+
+  async nslookup(name) {
+    if (!name) { this.println('Usage: nslookup <Name>\n'); return; }
+    const dns = Sim.dnsServerOf(this.dev);
+    if (dns === null) {
+      this.println('*** Default servers are not available');
+      this.println('Server:  UnKnown');
+      this.println('Address:  127.0.0.1\n');
+      this.println(`*** UnKnown can't find ${name}: No response from server\n`);
+      return;
+    }
+    this.println(`Server: [${IP.str(dns)}]`);
+    this.println(`Address:  ${IP.str(dns)}\n`);
+    const r = await Sim.dnsQuery(this.dev, name, Canvas.settings.animate);
+    if (r.status === 'ok') {
+      this.println('Non-authoritative answer:');
+      this.println(`Name:     ${r.name}`);
+      this.println(`Address:  ${IP.str(r.ip)}\n`);
+    } else if (r.status === 'nxdomain') {
+      this.println(`*** ${IP.str(dns)} can't find ${name}: Non-existent domain\n`);
+    } else {
+      this.println('DNS request timed out.');
+      this.println('    timeout was 2 seconds.');
+      this.println(`*** Request to ${IP.str(dns)} timed-out\n`);
+    }
+  }
+
   async tracert(target) {
     if (!target) { this.println('Usage: tracert target_name\n'); return; }
-    const dst = IP.parse(target);
-    if (dst === null) { this.println(`Unable to resolve target system name ${target}.\n`); return; }
-    this.println(`\nTracing route to ${target} over a maximum of 30 hops: \n`);
+    const res = await this.resolveTarget(target);
+    if (res.ip === undefined) { this.println(`Unable to resolve target system name ${target}.\n`); return; }
+    const dst = res.ip;
+    target = IP.str(dst);
+    this.println(`\nTracing route to ${res.name ? `${res.name} [${target}]` : target} over a maximum of 30 hops: \n`);
     for (let ttl = 1; ttl <= 30 && !this.abort; ttl++) {
       const r = Sim.forward(this.dev, dst, ttl);
       const n = String(ttl).padStart(3);
@@ -261,8 +326,8 @@ class Terminal {
     if (a[0] === '?' || is(a[0], 'help', 2)) {
       this.println([
         'Verfügbare Befehle:',
-        '  ping <IP>                     ICMP-Echo senden',
-        '  traceroute <IP>               Route verfolgen',
+        '  ping <IP|Name>                ICMP-Echo senden',
+        '  traceroute <IP|Name>          Route verfolgen',
         '  show ip route                 Routingtabelle',
         '  show ip interface brief       Schnittstellenübersicht',
         '  show running-config           aktuelle Konfiguration',
@@ -296,8 +361,9 @@ class Terminal {
   }
 
   async routerPing(target) {
-    const dst = IP.parse(target || '');
-    if (dst === null) { this.println('% Unrecognized host or address.\n'); return; }
+    const dst = await this.routerResolve(target);
+    if (dst === null) return;
+    target = IP.str(dst);
     this.println('Type escape sequence to abort.');
     this.println(`Sending 5, 100-byte ICMP Echos to ${target}, timeout is 2 seconds:`);
     let ok = 0, sent = 0, storm = false;
@@ -322,8 +388,9 @@ class Terminal {
   }
 
   async routerTrace(target) {
-    const dst = IP.parse(target || '');
-    if (dst === null) { this.println('% Unrecognized host or address.\n'); return; }
+    const dst = await this.routerResolve(target);
+    if (dst === null) return;
+    target = IP.str(dst);
     this.println('Type escape sequence to abort.');
     this.println(`Tracing the route to ${target}\n`);
     for (let ttl = 1; ttl <= 30 && !this.abort; ttl++) {
@@ -464,6 +531,7 @@ class Terminal {
       return ip !== null && mask !== null ? ` ip address ${IP.str(ip)} ${IP.str(mask)}` : ' no ip address';
     };
     L.push('Building configuration...\n', '!', `hostname ${r.name}`, '!');
+    if (IP.valid(r.dns || '')) L.push(`ip name-server ${r.dns}`, '!');
     if (r.type === 'l3switch') {
       if (r.ipRouting) L.push('ip routing', '!');
       if (!r.stp.enabled) L.push(`no spanning-tree vlan ${r.vlans.map(v => v.id).join(',')}`);
