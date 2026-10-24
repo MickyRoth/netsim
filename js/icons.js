@@ -24,25 +24,27 @@ ${bays}
   },
 
   switch() {
-    return `<rect x="0" y="0" width="220" height="44" rx="6" fill="#2f6fae" stroke="#1b4975" stroke-width="1.5"/>
-<rect x="2" y="2" width="216" height="12" rx="5" fill="#ffffff" fill-opacity="0.14"/>
+    const w = SWITCH_W, h = SWITCH_H;
+    return `<rect x="0" y="0" width="${w}" height="${h}" rx="6" fill="#2f6fae" stroke="#1b4975" stroke-width="1.5"/>
+<rect x="2" y="2" width="${w - 4}" height="11" rx="5" fill="#ffffff" fill-opacity="0.14"/>
 <g stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="#ffffff">
-<line x1="10" y1="15" x2="31" y2="15"/><path d="M31 11l7 4-7 4z" stroke="none"/>
-<line x1="38" y1="27" x2="17" y2="27"/><path d="M17 23l-7 4 7 4z" stroke="none"/>
+<line x1="10" y1="14" x2="31" y2="14"/><path d="M31 10l7 4-7 4z" stroke="none"/>
+<line x1="38" y1="26" x2="17" y2="26"/><path d="M17 22l-7 4 7 4z" stroke="none"/>
 </g>`;
   },
 
   /** Layer-3-Switch: Switch-Gehäuse mit den vier Router-Pfeilen (wie das Cisco-Multilayer-Symbol). */
   l3switch() {
-    return `<rect x="0" y="0" width="220" height="44" rx="6" fill="#1d5a96" stroke="#123c66" stroke-width="1.5"/>
-<rect x="2" y="2" width="216" height="12" rx="5" fill="#ffffff" fill-opacity="0.14"/>
-<g transform="translate(25,22) scale(0.52)" fill="#e3ecf7">
+    const w = SWITCH_W, h = SWITCH_H;
+    return `<rect x="0" y="0" width="${w}" height="${h}" rx="6" fill="#1d5a96" stroke="#123c66" stroke-width="1.5"/>
+<rect x="2" y="2" width="${w - 4}" height="11" rx="5" fill="#ffffff" fill-opacity="0.14"/>
+<g transform="translate(23,${h / 2}) scale(0.46)" fill="#e3ecf7">
 <polygon transform="rotate(45)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
 <polygon transform="rotate(225)" points="-36,-5 -18,-5 -18,-11 -5,0 -18,11 -18,5 -36,5"/>
 <polygon transform="rotate(-45)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
 <polygon transform="rotate(135)" points="5,-5 23,-5 23,-11 36,0 23,11 23,5 5,5"/>
 </g>
-<text x="212" y="12" text-anchor="end" font-size="9" font-weight="700" fill="#cfe0f3" font-family="Segoe UI, Arial, sans-serif">L3</text>`;
+<text x="50" y="${h / 2 + 3.5}" text-anchor="middle" font-size="9" font-weight="700" fill="#cfe0f3" font-family="Segoe UI, Arial, sans-serif">L3</text>`;
   },
 
   router() {

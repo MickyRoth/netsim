@@ -3,7 +3,7 @@
 /* Anwendung: Werkzeugleiste, Palette, Dateien, Export, Rückgängig, Tastatur. */
 
 /** Programmversion – bei jeder Veröffentlichung erhöhen (auch ?v= in index.html). */
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 
 const PALETTE = [
   { group: 'Endgeräte', items: ['pc', 'server'] },
@@ -372,14 +372,14 @@ const App = {
     r1.ports[2].ip = '10.0.0.1'; r1.ports[2].mask = '255.255.255.0';
     r1.routes.push({ network: '192.168.1.0', mask: '255.255.255.0', nextHop: '192.168.2.1' });
 
-    const s0 = mk('d3', 'switch', 'Switch1', 230, 180);
-    const s1 = mk('d4', 'switch', 'Switch2', 640, 180);
+    const s0 = mk('d3', 'switch', 'Switch1', 344, 190);
+    const s1 = mk('d4', 'switch', 'Switch2', 664, 190);
 
-    const pc0 = mk('d5', 'pc', 'PC1', 240, 310);
+    const pc0 = mk('d5', 'pc', 'PC1', 250, 320);
     Object.assign(pc0.ip, { ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1', dns: '192.168.1.2' });
-    const pc1 = mk('d6', 'pc', 'PC2', 340, 310);
+    const pc1 = mk('d6', 'pc', 'PC2', 380, 320);
     pc1.ip.mode = 'dhcp';
-    const srv = mk('d7', 'server', 'Server1', 450, 300);
+    const srv = mk('d7', 'server', 'Server1', 510, 312);
     Object.assign(srv.ip, { ip: '192.168.1.2', mask: '255.255.255.0', gateway: '192.168.1.1', dns: '192.168.1.2' });
     Object.assign(srv.dhcp, { enabled: true, gateway: '192.168.1.1', dns: '192.168.1.2', start: '192.168.1.100', mask: '255.255.255.0', max: 50 });
     srv.dns = {
@@ -394,9 +394,9 @@ const App = {
     r0.dns = '192.168.1.2';
     r1.dns = '192.168.1.2';
 
-    const pc2 = mk('d8', 'pc', 'PC3', 680, 310);
+    const pc2 = mk('d8', 'pc', 'PC3', 640, 320);
     Object.assign(pc2.ip, { ip: '10.0.0.10', mask: '255.255.255.0', gateway: '10.0.0.1', dns: '192.168.1.2' });
-    const pc3 = mk('d9', 'pc', 'PC4', 790, 310);
+    const pc3 = mk('d9', 'pc', 'PC4', 760, 320);
     Object.assign(pc3.ip, { ip: '10.0.0.11', mask: '255.255.255.0', gateway: '10.0.0.1', dns: '192.168.1.2' });
 
     const L = (id, a, ap, b, bp) => ({ id, a: { dev: a, port: ap }, b: { dev: b, port: bp } });
@@ -405,13 +405,13 @@ const App = {
       devices: [r0, r1, s0, s1, pc0, pc1, srv, pc2, pc3],
       links: [
         L('l10', 'd1', 1, 'd2', 0),   // Router1 Gi0/1 – Router2 Gi0/0
-        L('l11', 'd1', 2, 'd3', 7),   // Router1 Gi0/2 – Switch1 Fa0/8
-        L('l12', 'd2', 2, 'd4', 7),   // Router2 Gi0/2 – Switch2 Fa0/8
-        L('l13', 'd5', 0, 'd3', 0),   // PC1 – Switch1 Fa0/1
-        L('l14', 'd6', 0, 'd3', 1),   // PC2 – Switch1 Fa0/2
-        L('l15', 'd7', 0, 'd3', 2),   // Server1 – Switch1 Fa0/3
-        L('l16', 'd8', 0, 'd4', 0),   // PC3 – Switch2 Fa0/1
-        L('l17', 'd9', 0, 'd4', 1),   // PC4 – Switch2 Fa0/2
+        L('l11', 'd1', 2, 'd3', 0),   // Router1 Gi0/2 – Switch1 Fa0/1 (oben)
+        L('l12', 'd2', 2, 'd4', 0),   // Router2 Gi0/2 – Switch2 Fa0/1 (oben)
+        L('l13', 'd5', 0, 'd3', 1),   // PC1 – Switch1 Fa0/2 (unten)
+        L('l14', 'd6', 0, 'd3', 3),   // PC2 – Switch1 Fa0/4
+        L('l15', 'd7', 0, 'd3', 5),   // Server1 – Switch1 Fa0/6
+        L('l16', 'd8', 0, 'd4', 1),   // PC3 – Switch2 Fa0/2
+        L('l17', 'd9', 0, 'd4', 3),   // PC4 – Switch2 Fa0/4
       ],
     };
     for (const id of [...Win.wins.keys()]) Win.close(id);

@@ -198,7 +198,7 @@ const Canvas = {
     s += `<g class="dev-body">${Icons[d.type]()}</g>`;
     if (Sim.isSwitch(d)) {
       s += t.ports.map((p, i) =>
-        `<text x="${p.x}" y="${p.y - 10}" font-size="9" fill="#dbe8f6" text-anchor="middle">${i + 1}</text>`).join('');
+        `<text x="${p.x}" y="${p.y === 0 ? 16 : p.y - 8}" font-size="9" fill="#dbe8f6" text-anchor="middle">${i + 1}</text>`).join('');
     }
     s += t.ports.map((p, i) => this.portMarkup(d, i, p)).join('');
     s += this.labelMarkup(d, t);

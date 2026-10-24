@@ -5,6 +5,17 @@
  * Symbol in icons.js, Konfigurationsreiter in windows.js).
  * Portkoordinaten sind relativ zur linken oberen Ecke des Geräts.
  */
+const SWITCH_W = 140, SWITCH_H = 40;
+
+/** 8 Switchports wie auf der Front eines Cisco-Switches: ungerade Ports oben, gerade unten. */
+function switchPorts() {
+  return Array.from({ length: 8 }, (_, i) => ({
+    name: 'Fa0/' + (i + 1),
+    x: 62 + Math.floor(i / 2) * 20,
+    y: i % 2 === 0 ? 0 : SWITCH_H,
+  }));
+}
+
 const DEVICE_TYPES = {
   pc: {
     label: 'PC', sub: '', prefix: 'PC', w: 60, h: 56, startTtl: 128,
@@ -15,19 +26,20 @@ const DEVICE_TYPES = {
     ports: [{ name: 'Fa0', x: 26, y: 2 }],
   },
   switch: {
-    label: 'Switch (L2)', sub: '8 Port', prefix: 'Switch', w: 220, h: 44,
-    ports: Array.from({ length: 8 }, (_, i) => ({ name: 'Fa0/' + (i + 1), x: 60 + i * 20, y: 44 })),
+    label: 'Switch (L2)', sub: '8 Port', prefix: 'Switch', w: SWITCH_W, h: SWITCH_H,
+    ports: switchPorts(),
   },
   l3switch: {
-    label: 'Switch (L3)', sub: '8 Port · Routing', prefix: 'L3-Switch', w: 220, h: 44, startTtl: 255,
-    ports: Array.from({ length: 8 }, (_, i) => ({ name: 'Fa0/' + (i + 1), x: 60 + i * 20, y: 44 })),
+    label: 'Switch (L3)', sub: '8 Port · Routing', prefix: 'L3-Switch', w: SWITCH_W, h: SWITCH_H, startTtl: 255,
+    ports: switchPorts(),
   },
   router: {
-    label: 'Router', sub: '3 Port', prefix: 'Router', w: 84, h: 56, startTtl: 255,
+    label: 'Router', sub: '4 Port', prefix: 'Router', w: 84, h: 56, startTtl: 255,
     ports: [
-      { name: 'Gi0/0', x: 2, y: 30 },
-      { name: 'Gi0/1', x: 82, y: 30 },
-      { name: 'Gi0/2', x: 42, y: 54 },
+      { name: 'Gi0/0', x: 2, y: 30 },    // links
+      { name: 'Gi0/1', x: 82, y: 30 },   // rechts
+      { name: 'Gi0/2', x: 26, y: 53 },   // unten links
+      { name: 'Gi0/3', x: 58, y: 53 },   // unten rechts
     ],
   },
 };
