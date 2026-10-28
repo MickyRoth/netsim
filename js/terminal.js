@@ -243,6 +243,7 @@ class Terminal {
   async resolveTarget(target) {
     const ip = IP.parse(target || '');
     if (ip !== null) return { ip };
+    if (/^localhost\.?$/i.test(target)) return { ip: IP.parse('127.0.0.1'), name: 'localhost' }; // wie hosts-Datei
     if (!Sim.validHostname(target)) return { error: 'invalid' };
     const r = await Sim.dnsQuery(this.dev, target, Canvas.settings.animate);
     return r.status === 'ok' ? { ip: r.ip, name: r.name, dns: r.dns } : { error: r.status, dns: r.dns };
@@ -253,6 +254,7 @@ class Terminal {
     if (!target) { this.println('% Incomplete command.\n'); return null; }
     const ip = IP.parse(target);
     if (ip !== null) return ip;
+    if (/^localhost\.?$/i.test(target)) return IP.parse('127.0.0.1');
     if (!Sim.validHostname(target)) { this.println('% Unrecognized host or address, or protocol not running.\n'); return null; }
     const dns = Sim.dnsServerOf(this.dev);
     this.write(`Translating "${target}"...domain server (${dns !== null ? IP.str(dns) : '255.255.255.255'})`);

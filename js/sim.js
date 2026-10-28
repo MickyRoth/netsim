@@ -525,7 +525,11 @@ const Sim = {
    * Sendet ein IP-Paket von src an dst (Zahl) und verfolgt es Hop für Hop.
    * status: ok | timeout | unreach | noroute | ttl | noip | nogw
    */
+  /** Loopback-Bereich 127.0.0.0/8: das Gerät antwortet sich selbst, ohne Netzwerk. */
+  isLoopback(ip) { return (ip >>> 24) === 127; },
+
   forward(src, dst, ttl) {
+    if (this.isLoopback(dst)) return { status: 'ok', dev: src, ttl, hops: [], srcIp: dst, local: true };
     let cur = src, inPort = null, hops = [], srcIp = null;
     for (let step = 0; step < 64; step++) {
       const first = step === 0;
